@@ -117,7 +117,9 @@ impl Role {
     }
 
     pub fn from_id(id: &str) -> Option<Self> {
-        [Self::Inbox, Self::Sent, Self::Drafts, Self::Trash, Self::Junk, Self::Archive, Self::All, Self::Flagged].into_iter().find(|r| r.id() == id)
+        [Self::Inbox, Self::Sent, Self::Drafts, Self::Trash, Self::Junk, Self::Archive, Self::All, Self::Flagged]
+            .into_iter()
+            .find(|r| r.id() == id)
     }
 
     /// From IMAP SPECIAL-USE attributes (`\Sent`, ...) or, failing that, the name.
@@ -284,12 +286,17 @@ impl Db {
 
     pub fn accounts(&self) -> rusqlite::Result<Vec<AccountRow>> {
         let mut stmt = self.conn.prepare("SELECT id, address, name, last_sync, error FROM accounts ORDER BY address")?;
-        stmt.query_map([], |r| Ok(AccountRow { id: r.get(0)?, address: r.get(1)?, name: r.get(2)?, last_sync: r.get(3)?, error: r.get(4)? }))?
-            .collect()
+        stmt.query_map([], |r| {
+            Ok(AccountRow { id: r.get(0)?, address: r.get(1)?, name: r.get(2)?, last_sync: r.get(3)?, error: r.get(4)? })
+        })?
+        .collect()
     }
 
     pub fn set_account_state(&self, id: &str, last_sync: Option<i64>, error: Option<&str>) -> rusqlite::Result<()> {
-        self.conn.execute("UPDATE accounts SET last_sync = COALESCE(?2, last_sync), error = ?3 WHERE id = ?1", params![id, last_sync, error])?;
+        self.conn.execute(
+            "UPDATE accounts SET last_sync = COALESCE(?2, last_sync), error = ?3 WHERE id = ?1",
+            params![id, last_sync, error],
+        )?;
         Ok(())
     }
 
@@ -297,12 +304,17 @@ impl Db {
     /// nothing else uses any more (to delete from the store).
     pub fn remove_account(&mut self, id: &str) -> rusqlite::Result<Vec<String>> {
         let tx = self.conn.transaction()?;
-        let ids: Vec<i64> = tx.prepare("SELECT id FROM messages WHERE account = ?1")?.query_map(params![id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        let ids: Vec<i64> = tx
+            .prepare("SELECT id FROM messages WHERE account = ?1")?
+            .query_map(params![id], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
         for msg in &ids {
             tx.execute("DELETE FROM messages_fts WHERE rowid = ?1", params![msg])?;
         }
-        let raws: Vec<String> =
-            tx.prepare("SELECT DISTINCT raw FROM messages WHERE account = ?1 AND raw IS NOT NULL")?.query_map(params![id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+        let raws: Vec<String> = tx
+            .prepare("SELECT DISTINCT raw FROM messages WHERE account = ?1 AND raw IS NOT NULL")?
+            .query_map(params![id], |r| r.get(0))?
+            .collect::<Result<_, _>>()?;
         tx.execute("DELETE FROM accounts WHERE id = ?1", params![id])?;
         tx.execute("DELETE FROM ops WHERE account = ?1", params![id])?;
         tx.execute("DELETE FROM drafts WHERE account = ?1", params![id])?;
@@ -317,7 +329,13 @@ impl Db {
         Ok(orphans)
     }
 
-    pub fn upsert_mailbox(&self, account: &str, name: &str, delimiter: Option<&str>, role: Option<Role>) -> rusqlite::Result<i64> {
+    pub fn upsert_mailbox(
+        &self,
+        account: &str,
+        name: &str,
+        delimiter: Option<&str>,
+        role: Option<Role>,
+    ) -> rusqlite::Result<i64> {
         self.conn.execute(
             "INSERT INTO mailboxes (account, name, delimiter, role) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT (account, name) DO UPDATE SET delimiter = ?3, role = ?4",
@@ -362,7 +380,13 @@ impl Db {
         Ok(self.mailboxes(Some(account))?.into_iter().find(|m| m.role == Some(role)))
     }
 
-    pub fn set_mailbox_state(&self, id: i64, uidvalidity: Option<u32>, uidnext: Option<u32>, highestmodseq: Option<u64>) -> rusqlite::Result<()> {
+    pub fn set_mailbox_state(
+        &self,
+        id: i64,
+        uidvalidity: Option<u32>,
+        uidnext: Option<u32>,
+        highestmodseq: Option<u64>,
+    ) -> rusqlite::Result<()> {
         self.conn.execute(
             "UPDATE mailboxes SET uidvalidity = ?2, uidnext = ?3, highestmodseq = ?4 WHERE id = ?1",
             params![id, uidvalidity, uidnext, highestmodseq.map(|m| m as i64)],
@@ -393,7 +417,11 @@ impl Db {
     /// The conversation a message with this id belongs to, if stored.
     fn thread_of(&self, account: &str, message_id: &str) -> Option<String> {
         self.conn
-            .query_row("SELECT thread FROM messages WHERE account = ?1 AND message_id = ?2 LIMIT 1", params![account, message_id], |r| r.get(0))
+            .query_row(
+                "SELECT thread FROM messages WHERE account = ?1 AND message_id = ?2 LIMIT 1",
+                params![account, message_id],
+                |r| r.get(0),
+            )
             .optional()
             .ok()
             .flatten()
@@ -410,7 +438,8 @@ impl Db {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        let thread = thread::key(p.message_id.as_deref(), &p.in_reply_to, &p.references, m.gm_thrid, |id| self.thread_of(account, id));
+        let thread =
+            thread::key(p.message_id.as_deref(), &p.in_reply_to, &p.references, m.gm_thrid, |id| self.thread_of(account, id));
         let recipients: Vec<(String, String)> = p.to.iter().chain(&p.cc).map(|x| (x.name.clone(), x.email.clone())).collect();
         let from = p.from.clone().unwrap_or_default();
         let date = p.date.or(m.internal_date).unwrap_or(0);
@@ -497,7 +526,8 @@ impl Db {
 
     /// UIDs (and current flags) of a mailbox for one UIDVALIDITY.
     pub fn uids(&self, mailbox: i64, uidvalidity: u32) -> rusqlite::Result<Vec<(u32, i64)>> {
-        let mut stmt = self.conn.prepare("SELECT uid, flags FROM messages WHERE mailbox = ?1 AND uidvalidity = ?2 ORDER BY uid")?;
+        let mut stmt =
+            self.conn.prepare("SELECT uid, flags FROM messages WHERE mailbox = ?1 AND uidvalidity = ?2 ORDER BY uid")?;
         stmt.query_map(params![mailbox, uidvalidity], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
     }
 
@@ -521,7 +551,11 @@ impl Db {
         for uid in uids {
             let id: Option<i64> = self
                 .conn
-                .query_row("SELECT id FROM messages WHERE mailbox = ?1 AND uidvalidity = ?2 AND uid = ?3", params![mailbox, uidvalidity, uid], |r| r.get(0))
+                .query_row(
+                    "SELECT id FROM messages WHERE mailbox = ?1 AND uidvalidity = ?2 AND uid = ?3",
+                    params![mailbox, uidvalidity, uid],
+                    |r| r.get(0),
+                )
                 .optional()?;
             if let Some(id) = id {
                 self.remove_message(id)?;
@@ -607,7 +641,8 @@ impl Db {
     }
 
     pub fn attachments(&self, message: i64) -> rusqlite::Result<Vec<crate::mime::Attachment>> {
-        let mut stmt = self.conn.prepare("SELECT idx, name, mime, size, content_id FROM attachments WHERE message = ?1 ORDER BY idx")?;
+        let mut stmt =
+            self.conn.prepare("SELECT idx, name, mime, size, content_id FROM attachments WHERE message = ?1 ORDER BY idx")?;
         stmt.query_map(params![message], |r| {
             let size: i64 = r.get(3)?;
             Ok(crate::mime::Attachment {
@@ -628,15 +663,24 @@ impl Db {
     pub fn save_draft(&self, id: Option<i64>, account: &str, data: &serde_json::Value, now: i64) -> rusqlite::Result<i64> {
         match id {
             Some(id) => {
-                let n = self.conn.execute("UPDATE drafts SET account = ?2, data = ?3, updated = ?4 WHERE id = ?1", params![id, account, data.to_string(), now])?;
+                let n = self.conn.execute(
+                    "UPDATE drafts SET account = ?2, data = ?3, updated = ?4 WHERE id = ?1",
+                    params![id, account, data.to_string(), now],
+                )?;
                 if n == 1 {
                     return Ok(id);
                 }
-                self.conn.execute("INSERT INTO drafts (id, account, data, updated) VALUES (?1, ?2, ?3, ?4)", params![id, account, data.to_string(), now])?;
+                self.conn.execute(
+                    "INSERT INTO drafts (id, account, data, updated) VALUES (?1, ?2, ?3, ?4)",
+                    params![id, account, data.to_string(), now],
+                )?;
                 Ok(id)
             }
             None => {
-                self.conn.execute("INSERT INTO drafts (account, data, updated) VALUES (?1, ?2, ?3)", params![account, data.to_string(), now])?;
+                self.conn.execute(
+                    "INSERT INTO drafts (account, data, updated) VALUES (?1, ?2, ?3)",
+                    params![account, data.to_string(), now],
+                )?;
                 Ok(self.conn.last_insert_rowid())
             }
         }
@@ -668,10 +712,16 @@ impl Db {
 
     /// Queued changes for an account that are due, oldest first.
     pub fn due_ops(&self, account: &str, now: i64) -> rusqlite::Result<Vec<Op>> {
-        let mut stmt = self.conn.prepare("SELECT id, kind, payload, attempts FROM ops WHERE account = ?1 AND next_try <= ?2 ORDER BY id")?;
+        let mut stmt =
+            self.conn.prepare("SELECT id, kind, payload, attempts FROM ops WHERE account = ?1 AND next_try <= ?2 ORDER BY id")?;
         stmt.query_map(params![account, now], |r| {
             let payload: String = r.get(2)?;
-            Ok(Op { id: r.get(0)?, kind: r.get(1)?, payload: serde_json::from_str(&payload).unwrap_or_default(), attempts: r.get(3)? })
+            Ok(Op {
+                id: r.get(0)?,
+                kind: r.get(1)?,
+                payload: serde_json::from_str(&payload).unwrap_or_default(),
+                attempts: r.get(3)?,
+            })
         })?
         .collect()
     }
@@ -683,7 +733,10 @@ impl Db {
 
     /// Records a failed attempt; tries again after `retry_at`.
     pub fn op_failed(&self, id: i64, error: &str, retry_at: i64) -> rusqlite::Result<()> {
-        self.conn.execute("UPDATE ops SET attempts = attempts + 1, error = ?2, next_try = ?3 WHERE id = ?1", params![id, error, retry_at])?;
+        self.conn.execute(
+            "UPDATE ops SET attempts = attempts + 1, error = ?2, next_try = ?3 WHERE id = ?1",
+            params![id, error, retry_at],
+        )?;
         Ok(())
     }
 
@@ -716,7 +769,9 @@ pub struct Op {
 pub fn fts_query(input: &str) -> String {
     input
         .split_whitespace()
-        .map(|w| w.chars().filter(|c| c.is_alphanumeric() || *c == '@' || *c == '.' || *c == '-' || *c == '_').collect::<String>())
+        .map(|w| {
+            w.chars().filter(|c| c.is_alphanumeric() || *c == '@' || *c == '.' || *c == '-' || *c == '_').collect::<String>()
+        })
         .filter(|w| !w.is_empty())
         .map(|w| format!("\"{}\"*", w.replace('"', "")))
         .collect::<Vec<_>>()

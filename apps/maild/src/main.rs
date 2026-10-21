@@ -188,7 +188,8 @@ fn notify(conn: &gio::DBusConnection, list: &[(String, String)]) {
     hints.insert("desktop-entry".into(), "io.github.design_nexus.nixe.Mail".to_variant());
     hints.insert("category".into(), "email.arrived".to_variant());
     let actions: Vec<String> = vec!["default".into(), "Open".into()];
-    let params = ("Mail", 0u32, "io.github.design_nexus.nixe.Mail", summary.as_str(), body.as_str(), actions, hints, -1i32).to_variant();
+    let params =
+        ("Mail", 0u32, "io.github.design_nexus.nixe.Mail", summary.as_str(), body.as_str(), actions, hints, -1i32).to_variant();
     conn.call(
         Some("org.freedesktop.Notifications"),
         "/org/freedesktop/Notifications",

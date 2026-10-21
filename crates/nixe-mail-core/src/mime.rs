@@ -8,8 +8,8 @@
 
 use crate::thread;
 use mail_parser::{MessageParser, MimeHeaders};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Person {
@@ -60,7 +60,8 @@ fn people(addr: Option<&mail_parser::Address>) -> Vec<Person> {
         a.iter()
             .filter_map(|p| {
                 let email = p.address.as_deref()?.trim().to_string();
-                (!email.is_empty()).then(|| Person { name: p.name.as_deref().unwrap_or("").trim().trim_matches('"').to_string(), email })
+                (!email.is_empty())
+                    .then(|| Person { name: p.name.as_deref().unwrap_or("").trim().trim_matches('"').to_string(), email })
             })
             .collect()
     })
@@ -115,7 +116,10 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
         in_reply_to: id_list(message.in_reply_to()),
         references: id_list(message.references()),
         text: message.body_text(0).map(|t| t.into_owned()).filter(|t| !t.trim().is_empty()),
-        html: message.body_html(0).map(|t| t.into_owned()).filter(|_| message.html_bodies().next().is_some_and(|p| p.is_text_html())),
+        html: message
+            .body_html(0)
+            .map(|t| t.into_owned())
+            .filter(|_| message.html_bodies().next().is_some_and(|p| p.is_text_html())),
         attachments,
         list_id: header_text("List-Id"),
         list_unsubscribe: header_text("List-Unsubscribe"),
@@ -190,13 +194,7 @@ impl Parsed {
 
     /// Everyone on the message, for search.
     pub fn people_text(&self) -> String {
-        self.from
-            .iter()
-            .chain(&self.to)
-            .chain(&self.cc)
-            .map(|p| format!("{} {}", p.name, p.email))
-            .collect::<Vec<_>>()
-            .join(" ")
+        self.from.iter().chain(&self.to).chain(&self.cc).map(|p| format!("{} {}", p.name, p.email)).collect::<Vec<_>>().join(" ")
     }
 
     pub fn has_attachments(&self) -> bool {
@@ -217,8 +215,26 @@ pub struct Clean {
 }
 
 const LAYOUT_ATTRIBUTES: &[&str] = &[
-    "style", "class", "align", "valign", "bgcolor", "background", "width", "height", "border", "cellpadding", "cellspacing",
-    "color", "face", "size", "dir", "lang", "role", "colspan", "rowspan", "nowrap",
+    "style",
+    "class",
+    "align",
+    "valign",
+    "bgcolor",
+    "background",
+    "width",
+    "height",
+    "border",
+    "cellpadding",
+    "cellspacing",
+    "color",
+    "face",
+    "size",
+    "dir",
+    "lang",
+    "role",
+    "colspan",
+    "rowspan",
+    "nowrap",
 ];
 
 pub fn sanitize(html: &str) -> Clean {
@@ -226,7 +242,23 @@ pub fn sanitize(html: &str) -> Clean {
     let seen = remote.clone();
     let mut builder = ammonia::Builder::default();
     builder
-        .add_tags(["center", "font", "style", "span", "div", "section", "article", "header", "footer", "main", "nav", "figure", "figcaption", "picture", "source"])
+        .add_tags([
+            "center",
+            "font",
+            "style",
+            "span",
+            "div",
+            "section",
+            "article",
+            "header",
+            "footer",
+            "main",
+            "nav",
+            "figure",
+            "figcaption",
+            "picture",
+            "source",
+        ])
         .rm_clean_content_tags(["style"])
         .add_generic_attributes(LAYOUT_ATTRIBUTES.iter().copied())
         .add_tag_attributes("img", ["src", "alt", "title", "width", "height"])

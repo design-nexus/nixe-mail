@@ -141,7 +141,12 @@ pub fn reply(original: &Parsed, all: bool, me: &[String], from: Person, account:
 
 /// A forward with the original's text and attachments.
 pub fn forward(original: &Parsed, attachments: Vec<FileAttachment>, from: Person, account: &str, when: &str) -> Draft {
-    let people = |ps: &[Person]| ps.iter().map(|p| if p.name.is_empty() { p.email.clone() } else { format!("{} <{}>", p.name, p.email) }).collect::<Vec<_>>().join(", ");
+    let people = |ps: &[Person]| {
+        ps.iter()
+            .map(|p| if p.name.is_empty() { p.email.clone() } else { format!("{} <{}>", p.name, p.email) })
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
     let header = format!(
         "\n\n---------- Forwarded message ----------\nFrom: {}\nDate: {when}\nSubject: {}\nTo: {}\n\n",
         original.from.as_ref().map(|p| people(std::slice::from_ref(p))).unwrap_or_default(),
@@ -184,7 +189,10 @@ pub async fn smtp(server: &Server, auth: Auth, from: &str, to: &[String], raw: &
         .build();
     let envelope = lettre::address::Envelope::new(
         Some(from.parse().map_err(|e| NetError::SignIn(format!("the From address: {e}")))?),
-        to.iter().map(|t| t.parse()).collect::<Result<Vec<_>, _>>().map_err(|e| NetError::SignIn(format!("a recipient's address: {e}")))?,
+        to.iter()
+            .map(|t| t.parse())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| NetError::SignIn(format!("a recipient's address: {e}")))?,
     )
     .map_err(|e| NetError::SignIn(e.to_string()))?;
     transport.send_raw(&envelope, raw).await.map(|_| ()).map_err(|e| {
@@ -257,7 +265,14 @@ mod tests {
         assert_eq!(r.in_reply_to.as_deref(), Some("m1@example.com"));
         let all = reply(&original, true, &me, person("Me", "me@example.com"), "a", "Oct 21");
         assert_eq!(all.cc.iter().map(|p| p.email.as_str()).collect::<Vec<_>>(), ["ann@example.com", "bob@example.com"]);
-        let again = reply(&Parsed { subject: "RE: Lunch".into(), ..original.clone() }, false, &me, person("", "me@example.com"), "a", "x");
+        let again = reply(
+            &Parsed { subject: "RE: Lunch".into(), ..original.clone() },
+            false,
+            &me,
+            person("", "me@example.com"),
+            "a",
+            "x",
+        );
         assert_eq!(again.subject, "RE: Lunch");
         let f = forward(&original, Vec::new(), person("", "me@example.com"), "a", "Oct 21");
         assert_eq!(f.subject, "Fwd: Lunch");

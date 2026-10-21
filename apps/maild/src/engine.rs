@@ -133,7 +133,8 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
         match command {
             Command::Sync(which) => {
                 rediscover(&state);
-                let accounts: Vec<MailAccount> = state.borrow().accounts.iter().filter(|a| which.as_ref().is_none_or(|w| *w == a.id)).cloned().collect();
+                let accounts: Vec<MailAccount> =
+                    state.borrow().accounts.iter().filter(|a| which.as_ref().is_none_or(|w| *w == a.id)).cloned().collect();
                 for account in accounts {
                     let (state, events, me) = (state.clone(), events.clone(), me.clone());
                     tokio::task::spawn_local(async move { sync_account(&state, &account, &events, &me).await });
@@ -421,8 +422,7 @@ fn queue_send(state: &Shared, draft: &Draft) -> Result<String, String> {
     let id = send::message_id(&draft.from.email);
     let raw = draft.build(&id, now());
     let name = s.store.put(&raw).map_err(|e| e.to_string())?;
-    s.db
-        .queue(&account.id, "send", &json!({"raw": name, "from": draft.from.email, "to": draft.recipients()}), now())
+    s.db.queue(&account.id, "send", &json!({"raw": name, "from": draft.from.email, "to": draft.recipients()}), now())
         .map_err(|e| e.to_string())?;
     Ok(account.id.clone())
 }
@@ -443,7 +443,10 @@ async fn send_queued(state: &Shared, account_id: &str) -> Result<String, String>
     for op in ops {
         let raw_name = op.payload["raw"].as_str().unwrap_or_default().to_string();
         let from = op.payload["from"].as_str().unwrap_or_default().to_string();
-        let to: Vec<String> = op.payload["to"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default();
+        let to: Vec<String> = op.payload["to"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
         let raw = state.borrow().store.get(&raw_name).map_err(|e| e.to_string())?;
         let auth = account.smtp_auth(state.borrow().goa.as_ref());
         let result = match auth {

@@ -114,7 +114,13 @@ pub struct Sync<'a> {
 }
 
 impl<'a> Sync<'a> {
-    pub async fn new(session: &'a mut Session, db: &'a mut Db, store: &'a Store, account: &'a str, limits: Limits) -> Result<Self, NetError> {
+    pub async fn new(
+        session: &'a mut Session,
+        db: &'a mut Db,
+        store: &'a Store,
+        account: &'a str,
+        limits: Limits,
+    ) -> Result<Self, NetError> {
         let caps = session.capabilities().await?;
         let capabilities = caps.iter().map(|c| format!("{c:?}").to_ascii_uppercase()).collect();
         Ok(Self { session, db, store, account, limits, capabilities })
@@ -342,10 +348,20 @@ impl<'a> Sync<'a> {
                 let add = p["add"].as_i64().unwrap_or(0);
                 let remove = p["remove"].as_i64().unwrap_or(0);
                 if add != 0 {
-                    let _: Vec<_> = self.session.uid_store(uid.to_string(), format!("+FLAGS.SILENT ({})", flags::names(add).join(" "))).await?.try_collect().await?;
+                    let _: Vec<_> = self
+                        .session
+                        .uid_store(uid.to_string(), format!("+FLAGS.SILENT ({})", flags::names(add).join(" ")))
+                        .await?
+                        .try_collect()
+                        .await?;
                 }
                 if remove != 0 {
-                    let _: Vec<_> = self.session.uid_store(uid.to_string(), format!("-FLAGS.SILENT ({})", flags::names(remove).join(" "))).await?.try_collect().await?;
+                    let _: Vec<_> = self
+                        .session
+                        .uid_store(uid.to_string(), format!("-FLAGS.SILENT ({})", flags::names(remove).join(" ")))
+                        .await?
+                        .try_collect()
+                        .await?;
                 }
                 Ok(())
             }
@@ -357,7 +373,8 @@ impl<'a> Sync<'a> {
                     self.session.uid_mv(uid.to_string(), &to).await?;
                 } else {
                     self.session.uid_copy(uid.to_string(), &to).await?;
-                    let _: Vec<_> = self.session.uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)").await?.try_collect().await?;
+                    let _: Vec<_> =
+                        self.session.uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)").await?.try_collect().await?;
                     let _: Vec<_> = self.session.uid_expunge(uid.to_string()).await?.try_collect().await?;
                 }
                 Ok(())
@@ -407,7 +424,12 @@ pub fn queue_flags(db: &Db, message: i64, add: i64, remove: i64) -> rusqlite::Re
     let Some(m) = db.message(message)? else { return Ok(()) };
     db.change_flags(message, add, remove)?;
     db.recount(m.mailbox)?;
-    db.queue(&m.account, "flags", &json!({"mailbox": m.mailbox, "uidvalidity": m.uidvalidity, "uid": m.uid, "add": add, "remove": remove}), now())?;
+    db.queue(
+        &m.account,
+        "flags",
+        &json!({"mailbox": m.mailbox, "uidvalidity": m.uidvalidity, "uid": m.uid, "add": add, "remove": remove}),
+        now(),
+    )?;
     Ok(())
 }
 

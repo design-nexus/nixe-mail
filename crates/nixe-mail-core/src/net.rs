@@ -143,7 +143,9 @@ pub async fn imap(server: &Server, auth: Auth) -> Result<Session, NetError> {
         }
     };
     let session = match auth {
-        Auth::Password(password) => client.login(&server.user, &password).await.map_err(|(e, _)| NetError::SignIn(e.to_string()))?,
+        Auth::Password(password) => {
+            client.login(&server.user, &password).await.map_err(|(e, _)| NetError::SignIn(e.to_string()))?
+        }
         Auth::OAuth2(token) => {
             let xoauth2 = XOAuth2 { response: format!("user={}\x01auth=Bearer {token}\x01\x01", server.user) };
             client.authenticate("XOAUTH2", xoauth2).await.map_err(|(e, _)| NetError::SignIn(e.to_string()))?
