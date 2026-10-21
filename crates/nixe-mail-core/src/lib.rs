@@ -6,7 +6,10 @@
 
 pub mod db;
 pub mod mime;
+pub mod net;
+pub mod send;
 pub mod store;
+pub mod sync;
 pub mod thread;
 
 pub use db::{AccountRow, Db, ListItem, Mailbox, MessageRow, NewMessage, Op, Role};

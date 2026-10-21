@@ -11,7 +11,7 @@ use mail_parser::{MessageParser, MimeHeaders};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::collections::HashSet;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Person {
     pub name: String,
     pub email: String,
@@ -23,7 +23,7 @@ impl Person {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Attachment {
     /// Position among the message's attachments (for fetching the bytes).
     pub index: usize,
