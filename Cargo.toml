@@ -1,0 +1,13 @@
+[workspace]
+resolver = "3"
+members = ["apps/mail", "apps/maild", "crates/nixe-mail-core"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+authors = ["Ken Smith"]
+repository = "https://github.com/design-nexus/nixe-mail"
+
+[profile.release]
+lto = "thin"
+strip = true

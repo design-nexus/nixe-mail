@@ -1,0 +1,18 @@
+[package]
+name = "nixe-mail-core"
+version = "0.1.0"
+description = "Mail store, MIME, search and sync for Nixe Mail"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+ammonia = "4.2"
+html2text = "0.17"
+mail-builder = "1"
+mail-parser = "0.11"
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
