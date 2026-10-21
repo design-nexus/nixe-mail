@@ -160,3 +160,15 @@ fn fts_queries_are_literal() {
     assert_eq!(fts_query("a OR \"b\""), "\"a\"* \"OR\"* \"b\"*");
     assert_eq!(fts_query("  "), "");
 }
+
+#[test]
+fn drafts_save_and_delete() {
+    let (db, dir) = db();
+    let id = db.save_draft(None, "acc", &serde_json::json!({"subject": "Hi"}), 1).unwrap();
+    assert_eq!(db.save_draft(Some(id), "acc", &serde_json::json!({"subject": "Hi there"}), 2).unwrap(), id);
+    let all = db.drafts().unwrap();
+    assert_eq!((all.len(), all[0].2["subject"].as_str()), (1, Some("Hi there")));
+    db.delete_draft(id).unwrap();
+    assert!(db.drafts().unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

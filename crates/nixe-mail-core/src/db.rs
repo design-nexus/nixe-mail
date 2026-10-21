@@ -622,6 +622,40 @@ impl Db {
         .collect()
     }
 
+    // ---------- drafts (kept here while being written) ----------
+
+    /// Saves a draft (new when `id` is `None`); returns its id.
+    pub fn save_draft(&self, id: Option<i64>, account: &str, data: &serde_json::Value, now: i64) -> rusqlite::Result<i64> {
+        match id {
+            Some(id) => {
+                let n = self.conn.execute("UPDATE drafts SET account = ?2, data = ?3, updated = ?4 WHERE id = ?1", params![id, account, data.to_string(), now])?;
+                if n == 1 {
+                    return Ok(id);
+                }
+                self.conn.execute("INSERT INTO drafts (id, account, data, updated) VALUES (?1, ?2, ?3, ?4)", params![id, account, data.to_string(), now])?;
+                Ok(id)
+            }
+            None => {
+                self.conn.execute("INSERT INTO drafts (account, data, updated) VALUES (?1, ?2, ?3)", params![account, data.to_string(), now])?;
+                Ok(self.conn.last_insert_rowid())
+            }
+        }
+    }
+
+    pub fn drafts(&self) -> rusqlite::Result<Vec<(i64, String, serde_json::Value, i64)>> {
+        let mut stmt = self.conn.prepare("SELECT id, account, data, updated FROM drafts ORDER BY updated DESC")?;
+        stmt.query_map([], |r| {
+            let data: String = r.get(2)?;
+            Ok((r.get(0)?, r.get(1)?, serde_json::from_str(&data).unwrap_or_default(), r.get(3)?))
+        })?
+        .collect()
+    }
+
+    pub fn delete_draft(&self, id: i64) -> rusqlite::Result<()> {
+        self.conn.execute("DELETE FROM drafts WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     // ---------- the offline change queue ----------
 
     pub fn queue(&self, account: &str, kind: &str, payload: &serde_json::Value, now: i64) -> rusqlite::Result<i64> {

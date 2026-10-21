@@ -296,7 +296,8 @@ impl<'a> Sync<'a> {
     /// Sends queued changes for this account.
     pub async fn send_ops(&mut self, report: &mut Report) -> Result<(), NetError> {
         let due = self.db.due_ops(self.account, now()).map_err(db_err)?;
-        for op in due {
+        // Sends go over SMTP; the engine handles them before syncing.
+        for op in due.into_iter().filter(|o| o.kind != "send") {
             match self.apply(&op).await {
                 Ok(()) => {
                     self.db.op_done(op.id).map_err(db_err)?;

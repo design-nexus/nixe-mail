@@ -12,6 +12,9 @@ pub mod store;
 pub mod sync;
 pub mod thread;
 
+/// The crates whose types appear in this API.
+pub use {async_imap, rusqlite};
+
 pub use db::{AccountRow, Db, ListItem, Mailbox, MessageRow, NewMessage, Op, Role};
 pub use mime::{Attachment, Parsed};
 
