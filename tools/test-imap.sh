@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Run nixe-mail-core's network tests against a throwaway Dovecot (IMAP, TLS) and
-# an SMTP sink inside the tests. Everything lives in a scratch directory and runs
-# as this user; nothing touches real mail or system services.
+# an SMTP sink inside the tests, then nixe-maild on a private session bus.
+# Everything lives in a scratch directory and runs as this user; nothing
+# touches real mail or system services.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v dovecot >/dev/null || { echo "Install dovecot to run these tests." >&2; exit 1; }
-cargo test --locked -p nixe-mail-core --test imap --no-run
+cargo test --locked -p nixe-mail-core --features testing --test imap --no-run
+cargo test --locked -p nixe-maild --test session --no-run
 
 # Short path: Dovecot's sockets must fit in a Unix socket name.
 dir=$(mktemp -d /tmp/nm.XXXXXX)
@@ -15,7 +17,8 @@ stop() {
   rm -rf "$dir"
 }
 trap stop EXIT
-mkdir -p "$dir/run" "$dir/state" "$dir/home"
+mkdir -p "$dir/run" "$dir/state" "$dir/home" "$dir/xdg/data" "$dir/xdg/config" "$dir/xdg/cache" "$dir/xdg/run"
+chmod 700 "$dir/xdg/run"
 
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$dir/ca.key" -out "$dir/ca.pem" -days 2 \
   -subj "/CN=Nixe Mail Test CA" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=keyCertSign" 2>/dev/null
@@ -99,6 +102,12 @@ export NIXE_MAIL_TEST_DIR=$dir NIXE_MAIL_TEST_IMAP=$imap NIXE_MAIL_TEST_IMAPS=$i
 export NIXE_MAIL_EXTRA_CA=$dir/ca.pem NIXE_MAIL_TEST_CERT=$dir/cert.pem NIXE_MAIL_TEST_KEY=$dir/key.pem
 export NIXE_MAIL_TEST_START="$start" NIXE_MAIL_TEST_STOP="kill \$(cat $dir/run/master.pid)"
 status=0
-cargo test --locked -p nixe-mail-core --test imap -- --ignored --test-threads=1 "$@" || status=$?
+cargo test --locked -p nixe-mail-core --features testing --test imap -- --ignored --test-threads=1 "$@" || status=$?
+# The engine, on a private session bus with scratch XDG directories.
+if [[ $status == 0 ]]; then
+  XDG_DATA_HOME=$dir/xdg/data XDG_CONFIG_HOME=$dir/xdg/config XDG_CACHE_HOME=$dir/xdg/cache \
+    XDG_RUNTIME_DIR=$dir/xdg/run GSETTINGS_BACKEND=memory GIO_USE_VFS=local \
+    dbus-run-session -- cargo test --locked -p nixe-maild --test session -- --ignored "$@" || status=$?
+fi
 [[ $status == 0 ]] || tail -20 "$dir/dovecot.log" >&2
 exit "$status"

@@ -10,6 +10,8 @@ pub mod net;
 pub mod send;
 pub mod store;
 pub mod sync;
+#[cfg(feature = "testing")]
+pub mod testing;
 pub mod thread;
 
 /// The crates whose types appear in this API.

@@ -21,3 +21,7 @@ nixe-mail-core = { path = "../../crates/nixe-mail-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
+
+[dev-dependencies]
+nixe-mail-core = { path = "../../crates/nixe-mail-core", features = ["testing"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }

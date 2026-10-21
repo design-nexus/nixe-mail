@@ -12,24 +12,23 @@ use nixe_mail_core::net::{self, Auth, NetError, Security, Server, Session};
 use nixe_mail_core::send::{self, Draft};
 use nixe_mail_core::store::Store;
 use nixe_mail_core::sync::{self, Limits, Report, Sync};
+use nixe_mail_core::testing::{Dovecot, Sink, env, now};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-
-fn env(key: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| panic!("{key} isn't set; run tools/test-imap.sh"))
-}
-
-fn imap_server(user: &str) -> Server {
-    Server {
-        host: "127.0.0.1".into(),
-        port: env("NIXE_MAIL_TEST_IMAPS").parse().unwrap(),
-        security: Security::Implicit,
-        user: user.into(),
-    }
-}
 
 async fn session(user: &str) -> Result<Session, NetError> {
-    net::imap(&imap_server(user), Auth::Password("secret".into())).await
+    Dovecot::from_env().session(user).await
+}
+
+async fn deliver(user: &str, mailbox: &str, subject: &str, body: &str) {
+    Dovecot::from_env().deliver(user, mailbox, subject, body).await
+}
+
+async fn server_flags(user: &str, mailbox: &str, subject: &str) -> Vec<String> {
+    Dovecot::from_env().flags(user, mailbox, subject).await
+}
+
+async fn server_count(user: &str, mailbox: &str) -> u32 {
+    Dovecot::from_env().count(user, mailbox).await
 }
 
 /// One account's local side: database and store in a fresh directory.
@@ -79,48 +78,6 @@ impl Local {
     fn id_of(&self, name: &str, subject: &str) -> i64 {
         self.db.list(&[self.mailbox(name)], 100, 0).unwrap().into_iter().find(|m| m.subject == subject).unwrap().id
     }
-}
-
-fn now() -> i64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
-}
-
-fn message(subject: &str, body: &str) -> Vec<u8> {
-    let draft = Draft {
-        from: Person { name: "Sam Lee".into(), email: "sam@example.test".into() },
-        to: vec![Person { name: String::new(), email: "me@example.test".into() }],
-        subject: subject.into(),
-        body: body.into(),
-        ..Draft::default()
-    };
-    draft.build(&send::message_id("sam@example.test"), now())
-}
-
-/// Delivers a message straight into a mailbox, as another client would.
-async fn deliver(user: &str, mailbox: &str, subject: &str, body: &str) {
-    let mut s = session(user).await.unwrap();
-    s.append(mailbox, None, None, &message(subject, body)).await.unwrap();
-    s.logout().await.unwrap();
-}
-
-/// The server's system flags for a message, by subject (not keywords such as
-/// Dovecot's `$HasAttachment`).
-async fn server_flags(user: &str, mailbox: &str, subject: &str) -> Vec<String> {
-    let mut s = session(user).await.unwrap();
-    s.select(mailbox).await.unwrap();
-    let uids = s.uid_search(format!("SUBJECT \"{subject}\"")).await.unwrap();
-    let uid = *uids.iter().next().expect("message on the server");
-    let fetched: Vec<_> = s.uid_fetch(uid.to_string(), "(FLAGS)").await.unwrap().try_collect().await.unwrap();
-    let flags = fetched[0].flags().map(|f| format!("{f:?}")).filter(|f| !f.starts_with("Custom")).collect();
-    s.logout().await.unwrap();
-    flags
-}
-
-async fn server_count(user: &str, mailbox: &str) -> u32 {
-    let mut s = session(user).await.unwrap();
-    let m = s.select(mailbox).await.unwrap();
-    s.logout().await.unwrap();
-    m.exists
 }
 
 #[tokio::test]
@@ -304,7 +261,7 @@ async fn wait_for_server(up: bool) {
 #[tokio::test]
 #[ignore = "needs tools/test-imap.sh"]
 async fn bad_password_is_a_sign_in_error() {
-    let error = net::imap(&imap_server("nobody"), Auth::Password("wrong".into())).await.unwrap_err();
+    let error = net::imap(&Dovecot::from_env().server("nobody"), Auth::Password("wrong".into())).await.unwrap_err();
     assert!(matches!(error, NetError::SignIn(_)), "{error:?}");
     assert!(!error.transient());
 }
@@ -313,7 +270,7 @@ async fn bad_password_is_a_sign_in_error() {
 #[ignore = "needs tools/test-imap.sh"]
 async fn send_then_save_to_sent() {
     let user = "sender";
-    let sink = Sink::start().await;
+    let sink = Sink::start(&env("NIXE_MAIL_TEST_CERT"), &env("NIXE_MAIL_TEST_KEY")).await;
     let mut local = Local::new(user);
     local.sync().await.unwrap();
 
@@ -372,99 +329,4 @@ async fn removing_the_account_frees_its_files() {
     // The server keeps everything.
     assert_eq!(server_count(user, "INBOX").await, 1);
     let _ = std::fs::remove_dir_all(&local.dir);
-}
-
-/// A tiny SMTP server over implicit TLS that accepts anything and keeps what
-/// it got: (AUTH line, MAIL FROM, RCPT TOs, DATA).
-type Got = (String, String, Vec<String>, Vec<u8>);
-
-struct Sink {
-    port: u16,
-    messages: Arc<Mutex<Vec<Got>>>,
-}
-
-impl Sink {
-    async fn start() -> Self {
-        use rustls_pki_types::pem::PemObject;
-        let certs = rustls_pki_types::CertificateDer::pem_file_iter(env("NIXE_MAIL_TEST_CERT"))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        let key = rustls_pki_types::PrivateKeyDer::from_pem_file(env("NIXE_MAIL_TEST_KEY")).unwrap();
-        let config = rustls::ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .with_safe_default_protocol_versions()
-            .unwrap()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)
-            .unwrap();
-        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let messages = Arc::new(Mutex::new(Vec::new()));
-        let keep = messages.clone();
-        tokio::spawn(async move {
-            while let Ok((tcp, _)) = listener.accept().await {
-                let Ok(tls) = acceptor.accept(tcp).await else { continue };
-                if let Ok(got) = Self::serve(tls).await {
-                    keep.lock().unwrap().push(got);
-                }
-            }
-        });
-        Self { port, messages }
-    }
-
-    async fn serve(stream: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin) -> std::io::Result<Got> {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-        let mut stream = BufReader::new(stream);
-        let mut got: Got = Default::default();
-        stream.write_all(b"220 sink ESMTP\r\n").await?;
-        stream.flush().await?;
-        let mut line = String::new();
-        loop {
-            line.clear();
-            if stream.read_line(&mut line).await? == 0 {
-                return Err(std::io::ErrorKind::UnexpectedEof.into());
-            }
-            let upper = line.to_ascii_uppercase();
-            let reply: &[u8] = if upper.starts_with("EHLO") {
-                b"250-sink\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME\r\n"
-            } else if upper.starts_with("AUTH") {
-                use base64::Engine;
-                let encoded = line.split_whitespace().nth(2).unwrap_or_default();
-                let decoded = base64::engine::general_purpose::STANDARD.decode(encoded).unwrap_or_default();
-                got.0 = String::from_utf8_lossy(&decoded).replace('\0', " ");
-                b"235 ok\r\n"
-            } else if upper.starts_with("MAIL FROM:") {
-                got.1 = address(&line);
-                b"250 ok\r\n"
-            } else if upper.starts_with("RCPT TO:") {
-                got.2.push(address(&line));
-                b"250 ok\r\n"
-            } else if upper.starts_with("DATA") {
-                stream.write_all(b"354 go\r\n").await?;
-                stream.flush().await?;
-                loop {
-                    line.clear();
-                    stream.read_line(&mut line).await?;
-                    if line == ".\r\n" || line.is_empty() {
-                        break;
-                    }
-                    got.3.extend_from_slice(line.as_bytes());
-                }
-                b"250 queued\r\n"
-            } else if upper.starts_with("QUIT") {
-                stream.write_all(b"221 bye\r\n").await?;
-                stream.flush().await?;
-                return Ok(got);
-            } else {
-                b"250 ok\r\n"
-            };
-            stream.write_all(reply).await?;
-            stream.flush().await?;
-        }
-    }
-}
-
-fn address(line: &str) -> String {
-    line.split_once('<').and_then(|(_, rest)| rest.split_once('>')).map(|(a, _)| a.to_string()).unwrap_or_default()
 }

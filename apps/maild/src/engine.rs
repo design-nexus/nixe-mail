@@ -12,7 +12,7 @@ use nixe_mail_core::sync::{self, Limits, Sync};
 use nixe_mail_core::{Db, Paths, async_imap, flags, rusqlite};
 use serde_json::json;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -74,6 +74,8 @@ struct State {
     syncing: HashSet<String>,
     offline: HashSet<String>,
     idling: HashSet<String>,
+    /// One sender per account at a time, so a message never goes twice.
+    sending: HashMap<String, Rc<tokio::sync::Mutex<()>>>,
     active: bool,
 }
 
@@ -106,6 +108,7 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
         syncing: HashSet::new(),
         offline: HashSet::new(),
         idling: HashSet::new(),
+        sending: HashMap::new(),
         active: false,
     }));
     let events: Rc<dyn Fn(Event)> = {
@@ -265,7 +268,8 @@ fn destination(db: &Db, account: &str, role: Role) -> rusqlite::Result<Option<St
     Ok(None)
 }
 
-/// Re-reads the accounts from GOA; forgets mail of accounts that are gone.
+/// Re-reads the accounts from GOA (an account removed there stops syncing;
+/// the window offers to forget its mail).
 fn rediscover(state: &Shared) {
     let (accounts, skipped) = accounts::discover(state.borrow().goa.as_ref());
     let mut s = state.borrow_mut();
@@ -353,11 +357,19 @@ fn idle(state: Shared, account: MailAccount, me: mpsc::UnboundedSender<Command>)
     tokio::task::spawn_local(async move {
         let mut failures = 0u32;
         loop {
-            let inbox = state.borrow().db.mailbox_by_role(&account.id, Role::Inbox).ok().flatten().map(|m| m.name);
+            let inbox = {
+                let s = state.borrow();
+                let current = s.accounts.iter().any(|a| a.id == account.id);
+                s.db.mailbox_by_role(&account.id, Role::Inbox).ok().flatten().filter(|_| current)
+            };
             let Some(inbox) = inbox else { break };
             let outcome: Result<(), NetError> = async {
                 let mut session = connect(&state, &account).await?;
-                session.select(&inbox).await?;
+                let selected = session.select(&inbox.name).await?;
+                // Mail that came after the last sync and before IDLE began.
+                if selected.uid_next.is_some() && selected.uid_next != inbox.uidnext {
+                    let _ = me.send(Command::Sync(Some(account.id.clone())));
+                }
                 let mut handle = session.idle();
                 handle.init().await?;
                 let (wait, _stop) = handle.wait_with_timeout(IDLE_FOR);
@@ -430,6 +442,8 @@ fn queue_send(state: &Shared, draft: &Draft) -> Result<String, String> {
 /// Sends an account's queued mail. "sent" when it all went, "queued" when the
 /// server couldn't be reached (it goes later).
 async fn send_queued(state: &Shared, account_id: &str) -> Result<String, String> {
+    let lock = state.borrow_mut().sending.entry(account_id.to_string()).or_default().clone();
+    let _sending = lock.lock().await;
     let ops: Vec<_> = {
         let s = state.borrow();
         s.db.due_ops(account_id, now()).map_err(|e| e.to_string())?.into_iter().filter(|o| o.kind == "send").collect()

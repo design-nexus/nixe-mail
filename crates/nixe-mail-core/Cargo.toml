@@ -26,3 +26,11 @@ tokio = { version = "1", features = ["net", "rt", "time", "io-util", "macros"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 base64 = "0.22"
 
+
+[features]
+# An SMTP sink for integration tests.
+testing = []
+
+[[test]]
+name = "imap"
+required-features = ["testing"]
