@@ -19,6 +19,14 @@
   (`window::act`); closing the window sends what's waiting.
 - Compose (`compose.rs`): its own window; drafts save 2 s after a change and on close
   (engine `SaveDraft`), show in Drafts, and are deleted once sent.
+- Assistant (`control.rs`): `mail.search/inbox/read` (untrusted content), `mail.open`,
+  `mail.draft` (opens the composer filled in). Nothing sends; there's no `mail.send`.
+  `--describe` prints these tools without a window.
+- Recipient suggestions (`suggest.rs`): `Db::people` (people the user wrote to weigh 3×)
+  at once, then `nixe-contacts --find` (no window). The composer's window keys defer
+  while a suggestion list shows.
+- `--message ID` shows a conversation (Glimpse, notifications: nixe-maild runs it when one
+  is clicked). `apps/mail-glimpse` searches `mail.sqlite` in Glimpse's sandbox.
 - Never call `selection.set_selected` while `UI` is borrowed: its handler borrows it
   (`window::select`).
 - Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
