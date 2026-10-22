@@ -27,6 +27,15 @@
   while a suggestion list shows.
 - `--message ID` shows a conversation (Glimpse, notifications: nixe-maild runs it when one
   is clicked). `apps/mail-glimpse` searches `mail.sqlite` in Glimpse's sandbox.
+- Sorting on this computer only (`nixe_mail_core::organize`, schema v2): each message gets
+  a kind when stored (Imbox, The Feed, Paper Trail; `classify`); a sender choice
+  (`senders` table) wins. `SORT_VERSION` re-sorts stored mail when the rules change. The
+  Screener (off by default; `settings.screener_since`) holds inbox mail from senders not
+  let in; people written to are let in. Snoozes, follow-ups and send-later live in
+  nixe-maild (30 s tick; `NIXE_MAIL_TICK_SECONDS` in tests). `organize.rs` in the app
+  has the Snooze/More menus, the banners over a conversation and the Scheduled/Sender
+  cards. The reader toolbar must stay ≤ 407 px for 800 px windows (GTK's `.toolbar`
+  `border-spacing` is zeroed for it).
 - Never call `selection.set_selected` while `UI` is borrowed: its handler borrows it
   (`window::select`).
 - Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
