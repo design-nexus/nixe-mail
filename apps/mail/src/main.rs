@@ -24,13 +24,19 @@ const USAGE: &str = "Usage: nixe-mail [OPTIONS] [mailto:…]\n\
   --compose       write a new message\n\
   --message ID    show a message's conversation\n\
   --section ID    open inbox, drafts, sent, archive, junk, trash, mailbox:ID or settings\n\
-  --toggle        close the window if it's open, otherwise open it\n";
+  --toggle        close the window if it's open, otherwise open it\n\
+  --describe      print the control tools (JSON) and exit\n";
 
 fn main() -> glib::ExitCode {
     nixe_core::app::init(nixe_core::app::App { slug: "nixe-mail", name: "Mail" });
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print!("{USAGE}");
+        return glib::ExitCode::SUCCESS;
+    }
+    // The control tools as JSON, without a window (Nixe Assistant's abilities).
+    if args.iter().any(|a| a == "--describe") {
+        println!("{}", control::tools());
         return glib::ExitCode::SUCCESS;
     }
     if std::env::var_os("GSK_RENDERER").is_none() {
