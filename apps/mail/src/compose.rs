@@ -63,6 +63,8 @@ struct Compose {
     /// The message replied to (marked Answered once sent).
     answering: Option<i64>,
     sending: Cell<bool>,
+    /// Remind if nobody answers this many days after sending.
+    follow_up_days: Cell<Option<i64>>,
     closing: Cell<bool>,
 }
 
@@ -246,6 +248,14 @@ fn build(draft: Draft, draft_id: Option<i64>, answering: Option<i64>, title: &st
     bar.append(&more);
     bar.append(&discard);
     bar.append(&send_button);
+    let options = gtk::MenuButton::new();
+    options.set_icon_name("pan-down-symbolic");
+    options.set_has_frame(false);
+    options.set_tooltip_text(Some("Send later, or hear if nobody answers"));
+    options.add_css_class("flat");
+    options.add_css_class("icon-button");
+    options.set_valign(gtk::Align::Center);
+    bar.append(&options);
 
     let fields = gtk::Box::new(gtk::Orientation::Vertical, 0);
     fields.add_css_class("compose-fields");
@@ -340,6 +350,7 @@ fn build(draft: Draft, draft_id: Option<i64>, answering: Option<i64>, title: &st
         references: draft.references.clone(),
         answering,
         sending: Cell::new(false),
+        follow_up_days: Cell::new(None),
         closing: Cell::new(false),
     });
     redraw_files(&c);
@@ -383,8 +394,9 @@ fn build(draft: Draft, draft_id: Option<i64>, answering: Option<i64>, title: &st
     }
     {
         let c2 = c.clone();
-        send_button.connect_clicked(move |_| send_now(&c2));
+        send_button.connect_clicked(move |_| send_now(&c2, None));
     }
+    send_options(&c, &options);
     {
         let c2 = c.clone();
         window.connect_close_request(move |_| {
@@ -416,7 +428,7 @@ fn install_keys(c: &Shared) {
         let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
         let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
         match key {
-            gdk::Key::Return | gdk::Key::KP_Enter if ctrl => send_now(&c2),
+            gdk::Key::Return | gdk::Key::KP_Enter if ctrl => send_now(&c2, None),
             gdk::Key::a | gdk::Key::A if ctrl && shift => pick_files(&c2),
             gdk::Key::w if ctrl => c2.window.close(),
             gdk::Key::s if ctrl => save(&c2, false),
@@ -488,7 +500,8 @@ fn save(c: &Shared, closing: bool) {
     });
 }
 
-fn send_now(c: &Shared) {
+/// Sends now, or at `at` (from this computer: it has to be on then).
+fn send_now(c: &Shared, at: Option<i64>) {
     if c.sending.get() {
         return;
     }
@@ -513,9 +526,10 @@ fn send_now(c: &Shared) {
     }
     c.sending.set(true);
     c.send.set_sensitive(false);
-    c.note.set_text("Sending…");
+    c.note.set_text(if at.is_some() { "Scheduling…" } else { "Sending…" });
     let c2 = c.clone();
-    engine::send(&draft, move |r| {
+    let follow_up = c.follow_up_days.get().map(|days| at.unwrap_or_else(window::now) + days * 86_400);
+    engine::send_with(&draft, at, follow_up, move |r| {
         c2.sending.set(false);
         c2.send.set_sensitive(true);
         match r {
@@ -528,7 +542,12 @@ fn send_now(c: &Shared) {
                 }
                 c2.closing.set(true);
                 c2.window.close();
-                window::toast(if outcome == "queued" { "You're offline. It'll send when you're back online." } else { "Sent." });
+                let text = match outcome.as_str() {
+                    "queued" => "You're offline. It'll send when you're back online.".to_string(),
+                    "scheduled" => format!("It'll send {} (from this computer).", window::when_text(at.unwrap_or(0), true)),
+                    _ => "Sent.".to_string(),
+                };
+                window::toast(&text);
             }
             Err(e) => {
                 c2.note.set_text(&e);
@@ -609,4 +628,80 @@ fn redraw_files(c: &Shared) {
         chip.append(&remove);
         c.file_box.insert(&chip, -1);
     }
+}
+
+/// The menu beside Send: send at a later time, and a follow-up.
+fn send_options(c: &Shared, button: &gtk::MenuButton) {
+    let c = c.clone();
+    button.set_create_popup_func(move |button| {
+        let list = gtk::Box::new(gtk::Orientation::Vertical, 4);
+        list.add_css_class("menu-list");
+        let popover = gtk::Popover::new();
+        let heading = widgets::label("SEND LATER", "group-title");
+        heading.set_xalign(0.0);
+        list.append(&heading);
+        for (label, at) in crate::organize::send_later_times() {
+            let item = gtk::Button::with_label(&label);
+            item.add_css_class("flat");
+            item.add_css_class("menu-item");
+            let (c2, p) = (c.clone(), popover.clone());
+            item.connect_clicked(move |_| {
+                p.popdown();
+                send_now(&c2, Some(at));
+            });
+            list.append(&item);
+        }
+        // Any time: "2026-10-24 09:30".
+        let custom = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let when = gtk::Entry::new();
+        when.set_placeholder_text(Some("YYYY-MM-DD HH:MM"));
+        when.set_hexpand(true);
+        let go = widgets::icon_button("mail-send-symbolic", "Send then");
+        let (c2, p, w) = (c.clone(), popover.clone(), when.clone());
+        let schedule = move || {
+            let text = w.text().to_string();
+            let at = chrono::NaiveDateTime::parse_from_str(text.trim(), "%Y-%m-%d %H:%M")
+                .ok()
+                .and_then(|t| chrono::TimeZone::from_local_datetime(&chrono::Local, &t).earliest())
+                .map(|t| t.timestamp());
+            match at {
+                Some(at) if at > window::now() => {
+                    p.popdown();
+                    send_now(&c2, Some(at));
+                }
+                Some(_) => c2.note.set_text("That time has passed."),
+                None => c2.note.set_text("Write the time as 2026-10-24 09:30."),
+            }
+        };
+        let s2 = schedule.clone();
+        go.connect_clicked(move |_| s2());
+        when.connect_activate(move |_| schedule());
+        custom.append(&when);
+        custom.append(&go);
+        list.append(&custom);
+        list.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        let options = [
+            ("never", "Don't remind me"),
+            ("1", "Remind me in a day"),
+            ("3", "Remind me in 3 days"),
+            ("7", "Remind me in a week"),
+        ]
+        .iter()
+        .map(|(id, label)| (id.to_string(), label.to_string()))
+        .collect::<Vec<_>>();
+        let current = c.follow_up_days.get().map(|d| d.to_string()).unwrap_or_else(|| "never".into());
+        let c2 = c.clone();
+        let (row, _) = widgets::choice_row(
+            "If nobody answers",
+            "A notification, if no one has replied by then.",
+            options,
+            &current,
+            move |id| {
+                c2.follow_up_days.set(id.parse().ok());
+            },
+        );
+        list.append(&row);
+        popover.set_child(Some(&list));
+        button.set_popover(Some(&popover));
+    });
 }

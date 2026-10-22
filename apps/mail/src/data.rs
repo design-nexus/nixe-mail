@@ -1,8 +1,9 @@
 //! What the window reads: `mail.sqlite` (read-only; nixe-maild writes it) and
 //! the message store.
 
-use nixe_mail_core::db::{AccountRow, Db, ListItem, Mailbox, MessageRow, Role};
+use nixe_mail_core::db::{AccountRow, Db, FollowUp, ListItem, Mailbox, MessageRow, Role, Scheduled, SenderRow};
 use nixe_mail_core::mime::{self, Parsed};
+use nixe_mail_core::organize::{Filter, Kind, Screen};
 use nixe_mail_core::store::Store;
 use nixe_mail_core::{Paths, rusqlite};
 use std::cell::RefCell;
@@ -40,6 +41,14 @@ pub enum View {
     /// A role across every account (Inbox, Sent…).
     All(Role),
     Mailbox(i64),
+    /// Every inbox, one kind of mail.
+    Kind(Kind),
+    /// Inbox mail from senders not let in yet.
+    Screener,
+    Snoozed,
+    Scheduled,
+    FollowUps,
+    Senders,
 }
 
 impl View {
@@ -47,21 +56,45 @@ impl View {
         match self {
             Self::All(role) => role.id().to_string(),
             Self::Mailbox(id) => format!("mailbox:{id}"),
+            Self::Kind(kind) => kind.id().to_string(),
+            Self::Screener => "screener".into(),
+            Self::Snoozed => "snoozed".into(),
+            Self::Scheduled => "scheduled".into(),
+            Self::FollowUps => "follow-ups".into(),
+            Self::Senders => "senders".into(),
         }
     }
 
     pub fn from_id(id: &str) -> Self {
-        match id.strip_prefix("mailbox:").and_then(|i| i.parse().ok()) {
-            Some(mb) => Self::Mailbox(mb),
-            None => Self::All(Role::from_id(id).unwrap_or(Role::Inbox)),
+        if let Some(mb) = id.strip_prefix("mailbox:").and_then(|i| i.parse().ok()) {
+            return Self::Mailbox(mb);
+        }
+        match id {
+            "screener" => Self::Screener,
+            "snoozed" => Self::Snoozed,
+            "scheduled" => Self::Scheduled,
+            "follow-ups" => Self::FollowUps,
+            "senders" => Self::Senders,
+            _ => Kind::from_id(id).map(Self::Kind).unwrap_or_else(|| Self::All(Role::from_id(id).unwrap_or(Role::Inbox))),
         }
     }
 
     /// The mailboxes it covers.
     pub fn mailboxes(&self, all: &[Mailbox]) -> Vec<i64> {
+        let role = |r: Role| all.iter().filter(|m| m.role == Some(r)).map(|m| m.id).collect();
         match self {
-            Self::All(role) => all.iter().filter(|m| m.role == Some(*role)).map(|m| m.id).collect(),
+            Self::All(r) => role(*r),
             Self::Mailbox(id) => vec![*id],
+            Self::Kind(_) | Self::Screener | Self::Senders => role(Role::Inbox),
+            // Wherever the conversation is (not Trash, Junk or Sent).
+            Self::Snoozed | Self::FollowUps => all
+                .iter()
+                .filter(|m| {
+                    !matches!(m.role, Some(Role::Trash | Role::Junk | Role::Sent | Role::Drafts | Role::All | Role::Flagged))
+                })
+                .map(|m| m.id)
+                .collect(),
+            Self::Scheduled => Vec::new(),
         }
     }
 
@@ -70,6 +103,25 @@ impl View {
         match self {
             Self::All(role) => Some(*role),
             Self::Mailbox(id) => all.iter().find(|m| m.id == *id).and_then(|m| m.role),
+            Self::Kind(_) | Self::Screener => Some(Role::Inbox),
+            _ => None,
+        }
+    }
+
+    /// What the list leaves out or keeps, beyond its mailboxes.
+    pub fn filter(&self, all: &[Mailbox], screener: bool) -> Filter {
+        let inbox = self.role(all) == Some(Role::Inbox);
+        let screen = if !screener || !inbox {
+            Screen::Any
+        } else if *self == Self::Screener {
+            Screen::Pending
+        } else {
+            Screen::Cleared
+        };
+        match self {
+            Self::Kind(kind) => Filter { kind: Some(*kind), screen, snoozed: false },
+            Self::Snoozed => Filter { snoozed: true, ..Filter::default() },
+            _ => Filter { screen, ..Filter::default() },
         }
     }
 }
@@ -84,6 +136,56 @@ pub fn mailboxes() -> Vec<Mailbox> {
 
 pub fn list(mailboxes: &[i64], limit: usize) -> Vec<ListItem> {
     with(|db| db.list(mailboxes, limit, 0))
+}
+
+pub fn list_with(mailboxes: &[i64], filter: &Filter, limit: usize) -> Vec<ListItem> {
+    with(|db| db.list_with(mailboxes, filter, limit, 0))
+}
+
+pub fn screener_on() -> bool {
+    with(|db| db.screener_since().map(|s| s.is_some()))
+}
+
+/// Conversations waiting in the Screener.
+pub fn screener_count(all: &[Mailbox]) -> usize {
+    if !screener_on() {
+        return 0;
+    }
+    list_with(&View::Screener.mailboxes(all), &View::Screener.filter(all, true), 500).len()
+}
+
+pub fn senders(inboxes: &[i64]) -> Vec<SenderRow> {
+    with(|db| db.senders(inboxes, 500))
+}
+
+pub fn messages_from(address: &str, mailboxes: &[i64]) -> Vec<i64> {
+    with(|db| db.messages_from(address, mailboxes))
+}
+
+pub fn scheduled() -> Vec<Scheduled> {
+    with(|db| db.scheduled(crate::window::now()))
+}
+
+pub fn follow_ups() -> Vec<FollowUp> {
+    with(|db| db.follow_ups())
+}
+
+pub fn snoozed_until(thread: &str) -> Option<i64> {
+    with(|db| db.snoozed_until(thread))
+}
+
+pub fn newest_in_thread(thread: &str) -> Option<ListItem> {
+    with(|db| db.newest_in_thread(thread))
+}
+
+/// Whether a sender's mail is waiting in the Screener (or was screened out).
+pub fn waiting(address: &str) -> bool {
+    with(|db| db.screened_out_or_waiting(address))
+}
+
+/// The user's choice and guess for a sender, from the sender list.
+pub fn sender(address: &str, inboxes: &[i64]) -> Option<SenderRow> {
+    senders(inboxes).into_iter().find(|s| s.address.eq_ignore_ascii_case(address))
 }
 
 pub fn search(query: &str, limit: usize) -> Vec<ListItem> {

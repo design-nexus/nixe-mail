@@ -28,6 +28,8 @@ use webkit6::prelude::*;
 const SCHEME: &str = "nixe-mail-msg";
 
 struct Reader {
+    /// Over the conversation: the Screener's question, a snooze, a follow-up.
+    banner: gtk::Box,
     body: gtk::Box,
     scroll: gtk::ScrolledWindow,
     /// The conversation shown, and the mailboxes it was opened from.
@@ -64,9 +66,14 @@ pub fn build() -> gtk::Box {
         .vexpand(true)
         .child(&body)
         .build();
+    let banner = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    banner.add_css_class("reader-banner");
+    banner.set_visible(false);
+    root.append(&banner);
     root.append(&scroll);
     READER.with(|r| {
         *r.borrow_mut() = Some(Reader {
+            banner,
             body,
             scroll,
             thread: None,
@@ -80,6 +87,24 @@ pub fn build() -> gtk::Box {
     });
     show(None, &[]);
     root
+}
+
+/// Shows something other than a conversation (a scheduled message, a sender).
+pub fn show_card(card: &gtk::Widget) {
+    let Some(body) = with(|r| {
+        r.thread = None;
+        r.messages.clear();
+        r.drawn.clear();
+        r.views.clear();
+        r.banner.set_visible(false);
+        r.body.clone()
+    }) else {
+        return;
+    };
+    while let Some(child) = body.first_child() {
+        body.remove(&child);
+    }
+    body.append(card);
 }
 
 /// The conversation's messages as shown.
@@ -108,6 +133,17 @@ pub fn show(thread: Option<&str>, mailboxes: &[i64]) {
     .unwrap_or(false);
     if changed {
         redraw(!same);
+    }
+    // The banner reflects choices made elsewhere too, so it's redone each time.
+    if let Some(banner) = with(|r| r.banner.clone()) {
+        while let Some(child) = banner.first_child() {
+            banner.remove(&child);
+        }
+        let b = crate::organize::banner(&messages);
+        banner.set_visible(b.is_some());
+        if let Some(b) = b {
+            banner.append(&b);
+        }
     }
 }
 

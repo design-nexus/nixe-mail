@@ -13,16 +13,17 @@
   color: @theme_text;
 }
 
-.reader-bar {
-  padding: 0 12px;
+window.mail-window .toolbar.reader-bar {
+  padding: 0 6px;
+  border-spacing: 0;
 }
 
 .reader-bar .bar-gap {
-  min-width: 10px;
+  min-width: 6px;
 }
 
 window.mail-window .reader-bar button {
-  min-width: 34px;
+  min-width: 30px;
   padding: 0;
 }
 
@@ -241,4 +242,31 @@ window.mail-window .reader-bar button {
 
 .suggestion-name {
   font-weight: 600;
+}
+
+.kinds-bar {
+  padding: 8px 16px;
+  border-bottom: 1px solid @hairline;
+}
+
+.kinds-bar .segmented {
+  min-width: 0;
+}
+
+.kinds-bar .segment {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.reader-banner {
+  padding: 12px 24px 0 24px;
+}
+
+.menu-list {
+  padding: 4px;
+  min-width: 260px;
+}
+
+.menu-list .group-title {
+  margin: 4px 8px;
 }

@@ -65,6 +65,13 @@ fn reading(page: &Page) {
         |on| prefs::update(|p| p.mark_read = on),
     );
     group.add(&row);
+    let (row, _) = widgets::switch_row(
+        "Screener",
+        "Mail from people who haven't written before waits in the Screener until you let them in. People you've written to, and everyone who wrote before, come straight in.",
+        crate::data::screener_on(),
+        crate::engine::set_screener,
+    );
+    group.add(&row);
     let count = prefs.remote_senders.len();
     let desc = match count {
         0 => "Images from the web stay hidden in every message until you show them.".to_string(),

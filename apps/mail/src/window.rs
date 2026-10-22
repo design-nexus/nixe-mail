@@ -9,6 +9,7 @@
 use crate::compose::{self, Start};
 use crate::data::{self, View};
 use crate::engine::{self, Status};
+use crate::organize;
 use crate::prefs;
 use crate::reader;
 use crate::settings_dialog;
@@ -17,8 +18,9 @@ use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use nixe_mail_core::db::{ListItem, Mailbox, Role};
+use nixe_mail_core::db::{ListItem, Mailbox, Role, Scheduled, SenderRow};
 use nixe_mail_core::flags;
+use nixe_mail_core::organize::Kind;
 use nixe_mail_core::send::Draft;
 use nixe_ui::chrome;
 use std::cell::{Cell, RefCell};
@@ -38,6 +40,7 @@ pub const SHORTCUTS: &[(&[&str], &str)] = &[
     (&["!"], "Move to Junk"),
     (&["S"], "Star or unstar"),
     (&["U"], "Mark read or unread"),
+    (&["Z"], "Snooze"),
     (&["1"], "Inbox"),
     (&["2"], "Drafts"),
     (&["3"], "Sent"),
@@ -61,6 +64,10 @@ enum Row {
         draft: Box<Draft>,
         updated: i64,
     },
+    /// Mail waiting to send at a time.
+    Scheduled(Box<Scheduled>),
+    /// Someone who writes (the Senders page).
+    Sender(Box<SenderRow>),
 }
 
 impl Row {
@@ -68,6 +75,8 @@ impl Row {
         match self {
             Self::Conversation(c) => c.thread.clone(),
             Self::Draft { id, .. } => format!("draft:{id}"),
+            Self::Scheduled(s) => format!("scheduled:{}", s.op),
+            Self::Sender(s) => format!("sender:{}", s.address),
         }
     }
 }
@@ -94,6 +103,9 @@ struct Ui {
     list_stack: gtk::Stack,
     empty: gtk::Box,
     reader_bar: gtk::Box,
+    /// All, Imbox, The Feed, Paper Trail (inbox views only).
+    kinds: gtk::Box,
+    snooze: gtk::MenuButton,
     view: View,
     mailboxes: Vec<Mailbox>,
     rows: Vec<Row>,
@@ -329,6 +341,12 @@ fn view_title(u: &Ui) -> String {
     }
     match &u.view {
         View::All(role) => role_name(*role).to_string(),
+        View::Kind(kind) => kind.name().to_string(),
+        View::Screener => "Screener".into(),
+        View::Snoozed => "Snoozed".into(),
+        View::Scheduled => "Scheduled".into(),
+        View::FollowUps => "Follow-ups".into(),
+        View::Senders => "Senders".into(),
         View::Mailbox(id) => {
             let Some(mb) = u.mailboxes.iter().find(|m| m.id == *id) else { return "Mailbox".into() };
             let accounts = data::accounts();
@@ -378,23 +396,33 @@ fn rebuild_list() {
         if searching(&u) {
             rows.extend(data::search(u.search.text().trim(), u.limit).into_iter().map(Row::Conversation));
         } else {
-            if u.view == View::All(Role::Drafts) {
-                for (id, _, json, updated) in data::drafts() {
-                    if let Ok(draft) = serde_json::from_value::<Draft>(json) {
-                        rows.push(Row::Draft { id, draft: Box::new(draft), updated });
+            let mailboxes = u.view.mailboxes(&u.mailboxes);
+            match &u.view {
+                View::Scheduled => rows.extend(data::scheduled().into_iter().map(|s| Row::Scheduled(Box::new(s)))),
+                View::Senders => rows.extend(data::senders(&mailboxes).into_iter().map(|s| Row::Sender(Box::new(s)))),
+                View::FollowUps => rows
+                    .extend(data::follow_ups().iter().filter_map(|f| data::newest_in_thread(&f.thread)).map(Row::Conversation)),
+                view => {
+                    if *view == View::All(Role::Drafts) {
+                        for (id, _, json, updated) in data::drafts() {
+                            if let Ok(draft) = serde_json::from_value::<Draft>(json) {
+                                rows.push(Row::Draft { id, draft: Box::new(draft), updated });
+                            }
+                        }
                     }
+                    let filter = view.filter(&u.mailboxes, data::screener_on());
+                    rows.extend(data::list_with(&mailboxes, &filter, u.limit).into_iter().map(Row::Conversation));
                 }
             }
-            let mailboxes = u.view.mailboxes(&u.mailboxes);
-            rows.extend(data::list(&mailboxes, u.limit).into_iter().map(Row::Conversation));
         }
         rows.retain(|r| match r {
             Row::Conversation(c) => !u.hidden.contains(&c.id),
-            Row::Draft { .. } => true,
+            _ => true,
         });
         (rows, view_title(&u))
     };
     ui.borrow().list_title.set_text(&title);
+    rebuild_kinds();
     chrome::set_title(&ui.borrow().window, "Mail", &title);
 
     let (store, selection, open) = {
@@ -444,11 +472,18 @@ fn fill_empty(slot: &gtk::Box) {
     } else if searching(&u) {
         widgets::empty_state("edit-find-symbolic", "Nothing found", "", None)
     } else {
-        let text = match u.view.role(&u.mailboxes) {
-            Some(Role::Inbox) => "Your inbox is empty",
-            Some(Role::Drafts) => "No drafts",
-            Some(Role::Trash) => "Trash is empty",
-            Some(Role::Junk) => "No junk",
+        let text = match (&u.view, u.view.role(&u.mailboxes)) {
+            (View::Screener, _) => "Nobody new is waiting",
+            (View::Snoozed, _) => "Nothing snoozed",
+            (View::Scheduled, _) => "Nothing scheduled to send",
+            (View::FollowUps, _) => "No follow-ups set",
+            (View::Senders, _) => "Nobody has written yet",
+            (View::Kind(Kind::Feed), _) => "Nothing in the Feed",
+            (View::Kind(Kind::Paper), _) => "No receipts or notices",
+            (_, Some(Role::Inbox)) => "Your inbox is empty",
+            (_, Some(Role::Drafts)) => "No drafts",
+            (_, Some(Role::Trash)) => "Trash is empty",
+            (_, Some(Role::Junk)) => "No junk",
             _ => "No messages",
         };
         widgets::empty_state(role_icon(u.view.role(&u.mailboxes)), text, "", None)
@@ -461,6 +496,37 @@ fn list_row(row: &Row) -> gtk::Box {
     outer.add_css_class("mail-row");
     let top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let (who, when, subject, preview, unread, count, attach, flagged, draft) = match row {
+        Row::Scheduled(s) => (
+            format!("To {}", s.to.join(", ")),
+            when_text(s.at, true),
+            s.subject.clone(),
+            "Sends from this computer at that time.".to_string(),
+            false,
+            1,
+            false,
+            false,
+            false,
+        ),
+        Row::Sender(s) => (
+            if s.name.trim().is_empty() { s.address.clone() } else { s.name.clone() },
+            when_text(s.last, false),
+            s.address.clone(),
+            {
+                let mut facts = vec![s.kind.name().to_string()];
+                if s.screened.as_deref() == Some("out") {
+                    facts.push("screened out".into());
+                }
+                if s.unsubscribe.is_some() {
+                    facts.push("can unsubscribe".into());
+                }
+                facts.join(" · ")
+            },
+            s.unread > 0,
+            s.messages,
+            false,
+            false,
+            false,
+        ),
         Row::Conversation(c) => (
             if c.from_name.trim().is_empty() { c.from_addr.clone() } else { c.from_name.clone() },
             when_text(c.date, false),
@@ -560,6 +626,14 @@ fn on_selected() {
             ui.borrow_mut().open = None;
             reader::show(None, &[]);
             compose::open(Start::Draft(id));
+        }
+        Some(Row::Scheduled(s)) => {
+            ui.borrow_mut().open = None;
+            reader::show_card(&organize::scheduled_card(&s));
+        }
+        Some(Row::Sender(s)) => {
+            ui.borrow_mut().open = None;
+            reader::show_card(&organize::sender_card(&s));
         }
         None => {
             ui.borrow_mut().open = None;
@@ -770,11 +844,16 @@ fn refresh_readout() {
     let mut parts = Vec::new();
     if u.status.is_some() || !u.rows.is_empty() {
         let n = u.rows.len();
+        let (one, many) = match u.view {
+            View::Senders => ("sender", "senders"),
+            View::Scheduled => ("scheduled message", "scheduled messages"),
+            _ => ("conversation", "conversations"),
+        };
         parts.push(match n {
-            0 => "No conversations".to_string(),
-            1 => "1 conversation".to_string(),
-            n if n >= u.limit => format!("{n}+ conversations"),
-            n => format!("{n} conversations"),
+            0 => format!("No {many}"),
+            1 => format!("1 {one}"),
+            n if n >= u.limit => format!("{n}+ {many}"),
+            n => format!("{n} {many}"),
         });
     }
     match &u.status {
@@ -969,6 +1048,22 @@ fn rebuild_nav() {
         list_box.append(&button);
     }
 
+    // Sorting and timing (kept on this computer).
+    let status = ui.borrow().status.clone().unwrap_or_default();
+    let mut extra: Vec<(View, &str, &str, i64)> = Vec::new();
+    if status.screener || data::screener_on() {
+        extra.push((View::Screener, "view-reveal-symbolic", "Screener", data::screener_count(&mailboxes) as i64));
+    }
+    extra.push((View::Snoozed, "alarm-symbolic", "Snoozed", 0));
+    extra.push((View::Scheduled, "appointment-soon-symbolic", "Scheduled", status.scheduled));
+    extra.push((View::FollowUps, "document-open-recent-symbolic", "Follow-ups", status.follow_ups));
+    extra.push((View::Senders, "x-office-address-book-symbolic", "Senders", 0));
+    for (v, icon, name, count) in extra {
+        let button = nav_button(icon, name, name, count, active(&v));
+        button.connect_clicked(move |_| show_view(v.clone()));
+        list_box.append(&button);
+    }
+
     for (i, account) in accounts.iter().enumerate() {
         let mine: Vec<&Mailbox> = mailboxes
             .iter()
@@ -1144,11 +1239,14 @@ fn build(app: &gtk::Application) {
     list_column.add_css_class("list-column");
     list_column.set_size_request(340, -1);
     list_column.set_hexpand(false);
+    let kinds = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    kinds.add_css_class("kinds-bar");
     list_column.append(&list_bar);
+    list_column.append(&kinds);
     list_column.append(&list_stack);
 
     // The reading column.
-    let reader_bar = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    let reader_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     reader_bar.add_css_class("toolbar");
     reader_bar.add_css_class("reader-bar");
     let buttons: [(&str, &str, fn()); 8] = [
@@ -1161,16 +1259,23 @@ fn build(app: &gtk::Application) {
         ("mail-unread-symbolic", "Mark read or unread (U)", toggle_unread),
         ("starred-symbolic", "Star or unstar (S)", toggle_star),
     ];
+    let gap = || {
+        let gap = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        gap.add_css_class("bar-gap");
+        gap
+    };
     for (i, (icon, tip, run)) in buttons.into_iter().enumerate() {
         if i == 3 || i == 6 {
-            let gap = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            gap.add_css_class("bar-gap");
-            reader_bar.append(&gap);
+            reader_bar.append(&gap());
         }
         let b = widgets::icon_button(icon, tip);
         b.connect_clicked(move |_| run());
         reader_bar.append(&b);
     }
+    reader_bar.append(&gap());
+    let snooze = organize::snooze_button();
+    reader_bar.append(&snooze);
+    reader_bar.append(&organize::more_button());
     let reader_column = gtk::Box::new(gtk::Orientation::Vertical, 0);
     reader_column.set_hexpand(true);
     reader_column.append(&reader_bar);
@@ -1222,6 +1327,8 @@ fn build(app: &gtk::Application) {
         list_stack,
         empty,
         reader_bar,
+        kinds,
+        snooze,
         view: View::All(Role::Inbox),
         mailboxes: Vec::new(),
         rows: Vec::new(),
@@ -1368,6 +1475,14 @@ fn install_keys(window: &gtk::ApplicationWindow, search: &gtk::SearchEntry) {
             gdk::Key::exclam => junk(),
             gdk::Key::s => toggle_star(),
             gdk::Key::u => toggle_unread(),
+            gdk::Key::z => {
+                if let Some(ui) = ui()
+                    && !reader::messages().is_empty()
+                {
+                    let snooze = ui.borrow().snooze.clone();
+                    snooze.popup();
+                }
+            }
             gdk::Key::_1 => show_view(View::All(Role::Inbox)),
             gdk::Key::_2 => show_view(View::All(Role::Drafts)),
             gdk::Key::_3 => show_view(View::All(Role::Sent)),
@@ -1496,4 +1611,35 @@ fn show_toast(message: &str, undo: Option<Box<dyn Fn()>>) {
             overlay.remove_overlay(&bx);
         }
     });
+}
+
+/// The All / Imbox / Feed / Paper Trail switch over an inbox list.
+fn rebuild_kinds() {
+    let Some(ui) = ui() else { return };
+    let (kinds, view, search_on) = {
+        let u = ui.borrow();
+        (u.kinds.clone(), u.view.clone(), searching(&u))
+    };
+    while let Some(child) = kinds.first_child() {
+        kinds.remove(&child);
+    }
+    let shown = !search_on && matches!(view, View::All(Role::Inbox) | View::Kind(_));
+    kinds.set_visible(shown);
+    if !shown {
+        return;
+    }
+    let current = match view {
+        View::Kind(k) => k.id().to_string(),
+        _ => "all".to_string(),
+    };
+    let options: Vec<(String, String)> = [("all", "All"), ("imbox", "Imbox"), ("feed", "Feed"), ("paper", "Paper Trail")]
+        .iter()
+        .map(|(id, name)| (id.to_string(), name.to_string()))
+        .collect();
+    let switch = widgets::segmented(&options, &current, |id| {
+        // After this handler returns: the switch is rebuilt by the new view.
+        glib::idle_add_local_once(move || show_view(if id == "all" { View::All(Role::Inbox) } else { View::from_id(&id) }));
+    });
+    switch.set_hexpand(true);
+    kinds.append(&switch);
 }

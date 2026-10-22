@@ -20,6 +20,9 @@ pub struct Status {
     pub accounts: Vec<AccountStatus>,
     pub skipped: Vec<SkippedStatus>,
     pub pending: i64,
+    pub scheduled: i64,
+    pub follow_ups: i64,
+    pub screener: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -166,10 +169,38 @@ pub fn fetch_body(id: i64, done: impl FnOnce(Result<(), String>) + 'static) {
     call("FetchBody", Some((id,).to_variant()), move |r| done(r.map(|_| ())));
 }
 
-/// Sends; `Ok("sent")`, or `Ok("queued")` when offline (it goes later).
-pub fn send(draft: &Draft, done: impl FnOnce(Result<String, String>) + 'static) {
+/// Sends at `at` (now when `None`), with a follow-up at `follow_up`; replies
+/// "sent", "queued" or "scheduled".
+pub fn send_with(draft: &Draft, at: Option<i64>, follow_up: Option<i64>, done: impl FnOnce(Result<String, String>) + 'static) {
     let json = serde_json::to_string(draft).unwrap_or_default();
-    call("Send", Some((json,).to_variant()), move |r| done(r.map(|v| v.child_value(0).get::<String>().unwrap_or_default())));
+    let options = serde_json::json!({"at": at, "follow_up": follow_up}).to_string();
+    call("SendWith", Some((json, options).to_variant()), move |r| {
+        done(r.map(|v| v.child_value(0).get::<String>().unwrap_or_default()))
+    });
+}
+
+/// Takes back mail scheduled for later; gives the draft it became.
+pub fn unschedule(op: i64, done: impl FnOnce(Result<i64, String>) + 'static) {
+    call("Unschedule", Some((op,).to_variant()), move |r| done(r.map(|v| v.child_value(0).get::<i64>().unwrap_or(0))));
+}
+
+/// A choice for a sender: `{"kind": "feed"}`, `{"screened": "in"}`, null clears.
+pub fn set_sender(address: &str, choice: serde_json::Value) {
+    fire("SetSender", (address, choice.to_string()).to_variant());
+}
+
+pub fn set_screener(on: bool) {
+    fire("SetScreener", (on,).to_variant());
+}
+
+/// Hides a message's conversation until `until` (0: back now).
+pub fn snooze(message: i64, until: i64) {
+    fire("Snooze", (message, until).to_variant());
+}
+
+/// A reminder if nobody answers by `due` (0: none).
+pub fn follow_up(message: i64, due: i64) {
+    fire("FollowUp", (message, due).to_variant());
 }
 
 pub fn save_draft(id: Option<i64>, draft: &Draft, done: impl FnOnce(Result<i64, String>) + 'static) {
