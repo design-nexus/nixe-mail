@@ -53,6 +53,8 @@ pub struct Parsed {
     /// Mailing-list headers (the Feed uses these).
     pub list_id: Option<String>,
     pub list_unsubscribe: Option<String>,
+    /// Sent in bulk or by a machine (`Precedence: bulk|list|junk`, `Auto-Submitted`).
+    pub bulk: bool,
 }
 
 fn people(addr: Option<&mail_parser::Address>) -> Vec<Person> {
@@ -123,6 +125,9 @@ pub fn parse(raw: &[u8]) -> Option<Parsed> {
         attachments,
         list_id: header_text("List-Id"),
         list_unsubscribe: header_text("List-Unsubscribe"),
+        bulk: header_text("Precedence")
+            .is_some_and(|p| ["bulk", "list", "junk"].contains(&p.trim().to_ascii_lowercase().as_str()))
+            || header_text("Auto-Submitted").is_some_and(|a| !a.trim().eq_ignore_ascii_case("no")),
     })
 }
 

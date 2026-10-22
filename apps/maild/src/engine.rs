@@ -6,6 +6,7 @@
 use crate::accounts::{self, MailAccount, Skipped};
 use nixe_mail_core::db::Role;
 use nixe_mail_core::net::{self, NetError};
+use nixe_mail_core::organize::Kind;
 use nixe_mail_core::send::{self, Draft};
 use nixe_mail_core::store::Store;
 use nixe_mail_core::sync::{self, Limits, Sync};
@@ -40,6 +41,30 @@ pub enum Command {
     /// Forget an account's mail on this computer (after it was removed from
     /// Online Accounts; nothing on the server changes).
     Forget(String),
+    /// Send at a time (`None`: now), and remind if nobody answers by a time.
+    /// Replies "sent", "queued" or "scheduled".
+    SendWith {
+        draft: Box<Draft>,
+        at: Option<i64>,
+        follow_up: Option<i64>,
+        reply: Reply<String>,
+    },
+    /// Take back mail scheduled for later; replies with the draft it became.
+    Unschedule(i64, Reply<i64>),
+    /// The user's choice for a sender: where their mail goes, the Screener.
+    /// `None` leaves a part as it is; `Some(None)` clears it.
+    SetSender {
+        address: String,
+        kind: Option<Option<Kind>>,
+        screened: Option<Option<String>>,
+    },
+    SetScreener(bool),
+    /// Hide a message's conversation until a time (0: bring it back now).
+    Snooze(i64, i64),
+    /// Remind about a conversation if nobody answers by a time (0: don't).
+    FollowUp(i64, i64),
+    /// Every 30 s: wake snoozes, check follow-ups, send scheduled mail.
+    Tick,
 }
 
 /// What the engine reports.
@@ -50,6 +75,8 @@ pub enum Event {
     /// New unread mail in an inbox while the window isn't in front.
     /// (message id, sender, subject).
     NewMail(Vec<(i64, String, String)>),
+    /// Something to tell the user: a summary, a body, the message it opens.
+    Notice(String, String, Option<i64>),
 }
 
 pub fn start(events: impl Fn(Event) + Send + 'static) -> mpsc::UnboundedSender<Command> {
@@ -124,11 +151,22 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
     rediscover(&state);
     events(Event::Changed("status"));
 
-    // Periodic sync.
-    let tick = me.clone();
+    // Snoozes, follow-ups and scheduled mail.
+    let ticker = me.clone();
     tokio::task::spawn_local(async move {
         loop {
-            let _ = tick.send(Command::Sync(None));
+            tokio::time::sleep(tick_every()).await;
+            if ticker.send(Command::Tick).is_err() {
+                break;
+            }
+        }
+    });
+
+    // Periodic sync.
+    let periodic = me.clone();
+    tokio::task::spawn_local(async move {
+        loop {
+            let _ = periodic.send(Command::Sync(None));
             tokio::time::sleep(SYNC_EVERY).await;
         }
     });
@@ -201,10 +239,63 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
                     let _ = reply.send(result);
                 });
             }
+            Command::SendWith { draft, at, follow_up, reply } => {
+                let (state, events, me) = (state.clone(), events.clone(), me.clone());
+                tokio::task::spawn_local(async move {
+                    let later = at.is_some_and(|t| t > now());
+                    let result = queue_send(&state, &draft, at.unwrap_or_else(now), follow_up);
+                    let result = match result {
+                        Ok(_) if later => {
+                            events(Event::Changed("status"));
+                            Ok("scheduled".to_string())
+                        }
+                        Ok(account) => {
+                            let sent = send_queued(&state, &account).await;
+                            events(Event::Changed("status"));
+                            let _ = me.send(Command::Sync(Some(account)));
+                            sent
+                        }
+                        Err(e) => Err(e),
+                    };
+                    let _ = reply.send(result);
+                });
+            }
+            Command::Unschedule(op, reply) => {
+                let result = unschedule(&state, op);
+                events(Event::Changed("status"));
+                let _ = reply.send(result);
+            }
+            Command::SetSender { address, kind, screened } => {
+                with_db(&state, |db| db.set_sender(&address, kind, screened.as_ref().map(|s| s.as_deref()), now()));
+                events(Event::Changed("messages"));
+            }
+            Command::SetScreener(on) => {
+                with_db(&state, |db| db.set_screener(on, now()));
+                events(Event::Changed("messages"));
+            }
+            Command::Snooze(id, until) => {
+                with_db(&state, |db| {
+                    let Some(m) = db.message(id)? else { return Ok(()) };
+                    if until > 0 { db.snooze(&m.thread, until, now()) } else { db.unsnooze(&m.thread).map(|_| ()) }
+                });
+                events(Event::Changed("messages"));
+            }
+            Command::FollowUp(id, due) => {
+                with_db(&state, |db| {
+                    let Some(m) = db.message(id)? else { return Ok(()) };
+                    if due > 0 {
+                        db.follow_up(&m.thread, &m.account, &m.subject, now(), due)
+                    } else {
+                        db.cancel_follow_up(&m.thread).map(|_| ())
+                    }
+                });
+                events(Event::Changed("status"));
+            }
+            Command::Tick => tick(&state, &events, &me),
             Command::Send(draft, reply) => {
                 let (state, events, me) = (state.clone(), events.clone(), me.clone());
                 tokio::task::spawn_local(async move {
-                    let result = queue_send(&state, &draft);
+                    let result = queue_send(&state, &draft, now(), None);
                     let result = match result {
                         Ok(account) => {
                             let sent = send_queued(&state, &account).await;
@@ -298,6 +389,9 @@ async fn sync_account(state: &Shared, account: &MailAccount, events: &Rc<dyn Fn(
                 .new_in_inbox
                 .iter()
                 .filter_map(|id| s.db.message(*id).ok().flatten())
+                // Only people let in, writing to the Imbox (not lists or receipts).
+                .filter(|m| s.db.effective_kind(m.id).ok().flatten() == Some(Kind::Imbox))
+                .filter(|m| !s.db.screened_out_or_waiting(&m.from_addr).unwrap_or(false))
                 .map(|m| (m.id, if m.from_name.is_empty() { m.from_addr } else { m.from_name }, m.subject))
                 .collect();
             let active = s.active;
@@ -423,7 +517,9 @@ async fn fetch_body(state: &Shared, id: i64) -> Result<(), String> {
 }
 
 /// Builds the message, keeps it in the store and queues it; returns the account.
-fn queue_send(state: &Shared, draft: &Draft) -> Result<String, String> {
+/// Builds the message, keeps it in the store and queues it to send at `at`
+/// (with a follow-up when asked); returns the account.
+fn queue_send(state: &Shared, draft: &Draft, at: i64, follow_up: Option<i64>) -> Result<String, String> {
     let s = state.borrow();
     let account = s.accounts.iter().find(|a| a.id == draft.account).ok_or("That account isn't set up for mail.")?;
     if account.smtp.is_none() {
@@ -433,10 +529,14 @@ fn queue_send(state: &Shared, draft: &Draft) -> Result<String, String> {
         return Err("Add someone to send it to.".into());
     }
     let id = send::message_id(&draft.from.email);
-    let raw = draft.build(&id, now());
+    let raw = draft.build(&id, at.max(now()));
     let name = s.store.put(&raw).map_err(|e| e.to_string())?;
-    s.db.queue(&account.id, "send", &json!({"raw": name, "from": draft.from.email, "to": draft.recipients()}), now())
-        .map_err(|e| e.to_string())?;
+    let payload = json!({"raw": name, "from": draft.from.email, "to": draft.recipients(), "subject": draft.subject});
+    s.db.queue(&account.id, "send", &payload, at).map_err(|e| e.to_string())?;
+    if let Some(due) = follow_up {
+        let thread = s.db.thread_for(&account.id, &id, draft.in_reply_to.as_slice(), &draft.references);
+        s.db.follow_up(&thread, &account.id, &draft.subject, at.max(now()), due).map_err(|e| e.to_string())?;
+    }
     Ok(account.id.clone())
 }
 
@@ -502,6 +602,11 @@ pub struct Status {
     pub skipped: Vec<SkippedStatus>,
     /// Changes and sends waiting for the server.
     pub pending: i64,
+    /// Mail scheduled to send later.
+    pub scheduled: i64,
+    /// Follow-ups waiting for a reply.
+    pub follow_ups: i64,
+    pub screener: bool,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -544,9 +649,117 @@ fn publish(state: &Shared) {
             })
             .collect(),
         skipped: s.skipped.iter().map(|k| SkippedStatus { address: k.address.clone(), reason: k.reason.clone() }).collect(),
-        pending: s.db.pending_ops().unwrap_or(0),
+        pending: s.db.waiting_ops(now()).unwrap_or(0),
+        scheduled: s.db.scheduled(now()).map(|v| v.len() as i64).unwrap_or(0),
+        follow_ups: s.db.follow_ups().map(|v| v.len() as i64).unwrap_or(0),
+        screener: s.db.screener_since().ok().flatten().is_some(),
     };
     if let Ok(mut slot) = STATUS.lock() {
         *slot = Some(status);
     }
+}
+
+/// Wakes snoozed conversations (unread again), tells about follow-ups nobody
+/// answered, and sends mail whose time has come.
+fn tick(state: &Shared, events: &Rc<dyn Fn(Event)>, me: &mpsc::UnboundedSender<Command>) {
+    let t = now();
+    let own: Vec<String> = state.borrow().accounts.iter().map(|a| a.address.clone()).collect();
+    let (woke, unanswered) = {
+        let s = state.borrow();
+        let woke: Vec<(i64, String)> =
+            s.db.wake_snoozes(t)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|thread| s.db.newest_in_thread(thread).ok().flatten())
+                .map(|m| {
+                    let _ = sync::queue_flags(&s.db, m.id, 0, flags::SEEN);
+                    (m.id, m.subject)
+                })
+                .collect();
+        (woke, s.db.due_follow_ups(t, &own).unwrap_or_default())
+    };
+    let active = state.borrow().active;
+    for (id, subject) in &woke {
+        if !active {
+            events(Event::Notice("Back from snooze".into(), subject.clone(), Some(*id)));
+        }
+    }
+    for f in &unanswered {
+        let message = state.borrow().db.newest_in_thread(&f.thread).ok().flatten().map(|m| m.id);
+        events(Event::Notice("No reply yet".into(), f.subject.clone(), message));
+    }
+    if !woke.is_empty() {
+        events(Event::Changed("messages"));
+        let accounts: HashSet<String> =
+            woke.iter().filter_map(|(id, _)| state.borrow().db.message(*id).ok().flatten().map(|m| m.account)).collect();
+        push_soon(me, Some(accounts));
+    }
+    if !unanswered.is_empty() {
+        events(Event::Changed("status"));
+    }
+    // Scheduled mail whose time has come.
+    let due: Vec<String> = {
+        let s = state.borrow();
+        s.accounts
+            .iter()
+            .filter(|a| s.db.due_ops(&a.id, t).is_ok_and(|ops| ops.iter().any(|o| o.kind == "send")))
+            .map(|a| a.id.clone())
+            .collect()
+    };
+    for account in due {
+        let (state, events, me) = (state.clone(), events.clone(), me.clone());
+        tokio::task::spawn_local(async move {
+            if let Err(e) = send_queued(&state, &account).await {
+                events(Event::Notice("Scheduled mail wasn't sent".into(), e, None));
+            }
+            events(Event::Changed("status"));
+            let _ = me.send(Command::Sync(Some(account)));
+        });
+    }
+}
+
+/// A scheduled message taken back becomes a draft again (Bcc included: they
+/// are the recipients the message itself doesn't name).
+fn unschedule(state: &Shared, op: i64) -> Result<i64, String> {
+    let s = state.borrow();
+    let taken = s.db.unschedule(op, now()).map_err(|e| e.to_string())?.ok_or("That message already went, or isn't scheduled.")?;
+    let raw = s.store.get(&taken.raw).map_err(|e| e.to_string())?;
+    let parsed = nixe_mail_core::mime::parse(&raw).ok_or("The scheduled message couldn't be read.")?;
+    let named: Vec<String> = parsed.to.iter().chain(&parsed.cc).map(|p| p.email.to_lowercase()).collect();
+    let bcc = taken
+        .to
+        .iter()
+        .filter(|e| !named.contains(&e.to_lowercase()))
+        .map(|e| nixe_mail_core::mime::Person { name: String::new(), email: e.clone() })
+        .collect();
+    let attachments = parsed
+        .attachments
+        .iter()
+        .filter_map(|a| {
+            Some(send::FileAttachment {
+                name: a.name.clone(),
+                mime: a.mime.clone(),
+                bytes: nixe_mail_core::mime::attachment_bytes(&raw, a.index)?,
+            })
+        })
+        .collect();
+    let draft = Draft {
+        account: taken.account.clone(),
+        from: parsed.from.clone().unwrap_or_default(),
+        to: parsed.to.clone(),
+        cc: parsed.cc.clone(),
+        bcc,
+        subject: parsed.subject.clone(),
+        body: parsed.plain_text(),
+        in_reply_to: parsed.in_reply_to.first().cloned(),
+        references: parsed.references.clone(),
+        attachments,
+    };
+    let data = serde_json::to_value(&draft).map_err(|e| e.to_string())?;
+    s.db.save_draft(None, &taken.account, &data, now()).map_err(|e| e.to_string())
+}
+
+/// 30 s (tests shorten it with `NIXE_MAIL_TICK_SECONDS`).
+fn tick_every() -> Duration {
+    Duration::from_secs(std::env::var("NIXE_MAIL_TICK_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(30).max(1))
 }

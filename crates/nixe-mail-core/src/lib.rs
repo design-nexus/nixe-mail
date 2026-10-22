@@ -7,6 +7,7 @@
 pub mod db;
 pub mod mime;
 pub mod net;
+pub mod organize;
 pub mod send;
 pub mod store;
 pub mod sync;

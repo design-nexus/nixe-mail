@@ -32,8 +32,12 @@ impl Dovecot {
 
     /// Puts a message straight into a mailbox, as another client would.
     pub async fn deliver(&self, user: &str, mailbox: &str, subject: &str, body: &str) {
+        self.deliver_from(user, mailbox, "sam@example.test", subject, body).await
+    }
+
+    pub async fn deliver_from(&self, user: &str, mailbox: &str, sender: &str, subject: &str, body: &str) {
         let mut s = self.session(user).await.unwrap();
-        s.append(mailbox, None, None, &message(subject, body)).await.unwrap();
+        s.append(mailbox, None, None, &message_from(sender, subject, body)).await.unwrap();
         s.logout().await.unwrap();
     }
 
@@ -64,14 +68,19 @@ pub fn now() -> i64 {
 
 /// A plain message from Sam Lee.
 pub fn message(subject: &str, body: &str) -> Vec<u8> {
+    message_from("sam@example.test", subject, body)
+}
+
+pub fn message_from(sender: &str, subject: &str, body: &str) -> Vec<u8> {
+    let name = if sender == "sam@example.test" { "Sam Lee" } else { "" };
     let draft = Draft {
-        from: Person { name: "Sam Lee".into(), email: "sam@example.test".into() },
+        from: Person { name: name.into(), email: sender.into() },
         to: vec![Person { name: String::new(), email: "me@example.test".into() }],
         subject: subject.into(),
         body: body.into(),
         ..Draft::default()
     };
-    draft.build(&send::message_id("sam@example.test"), now())
+    draft.build(&send::message_id(sender), now())
 }
 
 /// A tiny SMTP server over implicit TLS that accepts anything and keeps what

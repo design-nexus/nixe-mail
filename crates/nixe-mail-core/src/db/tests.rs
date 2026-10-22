@@ -197,3 +197,147 @@ fn people_to_suggest() {
     assert!(db.people(" ", 5).unwrap().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn version_one_databases_are_sorted_on_upgrade() {
+    let dir = std::env::temp_dir().join(format!("nixe-mail-migrate-{}-{}", std::process::id(), rand_suffix()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("mail.sqlite");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        conn.pragma_update(None, "user_version", 1).unwrap();
+        conn.execute_batch(
+            "INSERT INTO accounts (id, address) VALUES ('a', 'me@example.com');
+             INSERT INTO mailboxes (id, account, name, role) VALUES (1, 'a', 'INBOX', 'inbox');
+             INSERT INTO messages (account, mailbox, uid, uidvalidity, thread, date, from_addr, subject, list_id)
+               VALUES ('a', 1, 1, 1, 't1', 10, 'news@list.example', 'Weekly', '<list.example>'),
+                      ('a', 1, 2, 1, 't2', 20, 'noreply@bank.example', 'Statement ready', NULL),
+                      ('a', 1, 3, 1, 't3', 30, 'sam@example.com', 'Lunch?', NULL);",
+        )
+        .unwrap();
+    }
+    let db = Db::open(&path).unwrap();
+    let kinds: Vec<String> = db
+        .conn()
+        .prepare("SELECT kind FROM messages ORDER BY uid")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(|k| k.unwrap())
+        .collect();
+    assert_eq!(kinds, ["feed", "paper", "imbox"]);
+    let version: i64 = db.conn().query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(version, VERSION);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn from(uid: u32, id: &str, sender: &str, subject: &str, date: i64) -> NewMessage {
+    let mut m = msg(uid, id, None, subject, date, "x");
+    m.parsed.from = Some(Person { name: String::new(), email: sender.into() });
+    m
+}
+
+#[test]
+fn categories_and_the_screener() {
+    use crate::organize::{Filter, Kind, Screen};
+    let (db, dir) = db();
+    db.upsert_account("acc", "me@example.com", "").unwrap();
+    let inbox = db.upsert_mailbox("acc", "INBOX", None, Some(Role::Inbox)).unwrap();
+    let sent = db.upsert_mailbox("acc", "Sent", None, Some(Role::Sent)).unwrap();
+    let mut news = from(1, "n@x", "news@list.example", "Weekly digest", 100);
+    news.parsed.list_id = Some("<list.example>".into());
+    db.put_message("acc", inbox, &news).unwrap();
+    db.put_message("acc", inbox, &from(2, "r@x", "shop@store.example", "Your receipt", 110)).unwrap();
+    db.put_message("acc", inbox, &from(3, "o@x", "old@friend.example", "Hello", 120)).unwrap();
+    let kind = |k| {
+        db.list_with(&[inbox], &Filter { kind: Some(k), ..Filter::default() }, 10, 0)
+            .unwrap()
+            .iter()
+            .map(|m| m.subject.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(kind(Kind::Feed), ["Weekly digest"]);
+    assert_eq!(kind(Kind::Paper), ["Your receipt"]);
+    // The user moves the store to the Feed.
+    db.set_sender("Shop@Store.example", Some(Some(Kind::Feed)), None, 1).unwrap();
+    assert_eq!(kind(Kind::Feed), ["Your receipt", "Weekly digest"]);
+
+    // The Screener starts at 200: earlier senders are in; new ones wait.
+    db.set_screener(true, 200).unwrap();
+    db.put_message("acc", inbox, &from(4, "s@x", "stranger@new.example", "Quick question", 210)).unwrap();
+    let mut mine = from(5, "m@x", "me@example.com", "Plans", 220);
+    mine.parsed.to = vec![Person { name: String::new(), email: "Pal@Friend.example".into() }];
+    db.put_message("acc", sent, &mine).unwrap();
+    db.put_message("acc", inbox, &from(6, "p@x", "pal@friend.example", "Re: Plans", 230)).unwrap();
+    let screen = |s| {
+        db.list_with(&[inbox], &Filter { screen: s, ..Filter::default() }, 10, 0)
+            .unwrap()
+            .iter()
+            .map(|m| m.subject.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(screen(Screen::Pending), ["Quick question"]);
+    assert!(screen(Screen::Cleared).contains(&"Re: Plans".to_string()), "written to: let in");
+    assert!(db.screened_out_or_waiting("stranger@new.example").unwrap());
+    db.set_sender("stranger@new.example", None, Some(Some("out")), 240).unwrap();
+    assert_eq!(screen(Screen::Out), ["Quick question"]);
+    assert!(screen(Screen::Pending).is_empty());
+    db.set_screener(false, 250).unwrap();
+    assert!(!db.screened_out_or_waiting("anyone@new.example").unwrap());
+
+    let senders = db.senders(&[inbox], 10).unwrap();
+    let shop = senders.iter().find(|s| s.address == "shop@store.example").unwrap();
+    assert_eq!((shop.kind, shop.chosen), (Kind::Feed, true));
+    assert_eq!(db.messages_from("SHOP@store.example", &[inbox]).unwrap().len(), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn snoozes_follow_ups_and_scheduled_mail() {
+    use crate::organize::Filter;
+    let (db, dir) = db();
+    db.upsert_account("acc", "me@example.com", "").unwrap();
+    let inbox = db.upsert_mailbox("acc", "INBOX", None, Some(Role::Inbox)).unwrap();
+    db.put_message("acc", inbox, &from(1, "a@x", "sam@example.com", "Later", 10)).unwrap();
+    let thread = db.message(1).unwrap().unwrap().thread;
+    db.snooze(&thread, 500, 20).unwrap();
+    assert!(db.list(&[inbox], 10, 0).unwrap().is_empty(), "snoozed: out of the inbox");
+    assert_eq!(db.list_with(&[inbox], &Filter { snoozed: true, ..Filter::default() }, 10, 0).unwrap().len(), 1);
+    assert_eq!(db.next_due().unwrap(), Some(500));
+    assert!(db.wake_snoozes(499).unwrap().is_empty());
+    assert_eq!(db.wake_snoozes(500).unwrap(), vec![thread.clone()]);
+    assert_eq!(db.list(&[inbox], 10, 0).unwrap().len(), 1);
+
+    // Follow-ups: one answered by Sam, one only by me.
+    let own = vec!["me@example.com".to_string()];
+    db.follow_up(&thread, "acc", "Later", 10, 100).unwrap();
+    db.follow_up("quiet", "acc", "Anyone?", 10, 100).unwrap();
+    db.put_message("acc", inbox, &from(2, "b@x", "me@example.com", "Re: Anyone?", 50)).unwrap();
+    db.conn().execute("UPDATE messages SET thread = 'quiet' WHERE uid = 2", []).unwrap();
+    db.put_message(
+        "acc",
+        inbox,
+        &NewMessage {
+            parsed: crate::mime::Parsed {
+                in_reply_to: vec!["a@x".into()],
+                ..from(3, "c@x", "sam@example.com", "Re: Later", 60).parsed
+            },
+            ..from(3, "c@x", "sam@example.com", "Re: Later", 60)
+        },
+    )
+    .unwrap();
+    assert!(db.due_follow_ups(99, &own).unwrap().is_empty());
+    let due = db.due_follow_ups(100, &own).unwrap();
+    assert_eq!(due.iter().map(|f| f.subject.as_str()).collect::<Vec<_>>(), ["Anyone?"]);
+    assert!(db.follow_ups().unwrap().is_empty());
+
+    // Mail scheduled for later isn't "waiting"; taking it back removes it.
+    let op = db.queue("acc", "send", &serde_json::json!({"raw": "r", "to": ["sam@example.com"], "subject": "Hi"}), 1000).unwrap();
+    db.queue("acc", "flags", &serde_json::json!({}), 10).unwrap();
+    assert_eq!(db.scheduled(20).unwrap()[0].subject, "Hi");
+    assert_eq!(db.waiting_ops(20).unwrap(), 1);
+    assert_eq!(db.unschedule(op, 20).unwrap().map(|s| s.at), Some(1000));
+    assert!(db.scheduled(20).unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

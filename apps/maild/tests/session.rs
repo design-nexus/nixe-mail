@@ -129,6 +129,7 @@ fn syncs_pushes_new_mail_sends_and_saves_changes() {
         std::process::Command::new(env!("CARGO_BIN_EXE_nixe-maild"))
             .env("NIXE_MAIL_TEST_ACCOUNTS", &accounts)
             .env("NIXE_MAIL_PROGRAM", &program)
+            .env("NIXE_MAIL_TICK_SECONDS", "1")
             .spawn()
             .unwrap(),
     );
@@ -191,8 +192,47 @@ fn syncs_pushes_new_mail_sends_and_saves_changes() {
     assert!(pump(10, || status(&conn)["pending"] == 0), "{}", status(&conn));
     assert_eq!(sink.messages.lock().unwrap().len(), 1, "still exactly once");
 
+    // Scheduled for two seconds from now: it waits, then goes.
+    let soon = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64 + 2;
+    let later = Draft { subject: "Later".into(), ..draft.clone() };
+    let options = serde_json::json!({"at": soon()}).to_string();
+    let reply = call(&conn, "SendWith", Some((serde_json::to_string(&later).unwrap(), options).to_variant())).unwrap();
+    assert_eq!(reply.child_value(0).get::<String>().as_deref(), Some("scheduled"));
+    assert_eq!(status(&conn)["scheduled"], 1);
+    assert_eq!(sink.messages.lock().unwrap().len(), 1, "not yet");
+    assert!(pump(15, || sink.messages.lock().unwrap().len() == 2), "the scheduled message didn't go");
+    assert!(pump(5, || status(&conn)["scheduled"] == 0));
+
+    // A follow-up nobody answers comes back as a notice.
+    call(&conn, "SetActive", Some((false,).to_variant())).unwrap();
+    let asking = Draft { subject: "Anyone?".into(), ..draft.clone() };
+    let options = serde_json::json!({"follow_up": soon()}).to_string();
+    call(&conn, "SendWith", Some((serde_json::to_string(&asking).unwrap(), options).to_variant())).unwrap();
+    assert!(
+        pump(15, || shown.borrow().iter().any(|(s, b)| s == "No reply yet" && b == "Anyone?")),
+        "no follow-up notice: {:?}",
+        shown.borrow()
+    );
+
+    // Snoozed: out of the inbox, then back, unread.
+    let tickets = message_id("Tickets").unwrap();
+    call(&conn, "Snooze", Some((tickets, soon()).to_variant())).unwrap();
+    assert!(pump(5, || message_id("Tickets").is_none()), "still in the inbox");
+    assert!(pump(15, || shown.borrow().iter().any(|(s, b)| s == "Back from snooze" && b == "Tickets")));
+    assert!(pump(5, || message_id("Tickets")
+        .is_some_and(|id| db().message(id).unwrap().unwrap().flags & nixe_mail_core::flags::SEEN == 0)));
+
+    // With the Screener on, a stranger's mail arrives quietly.
+    call(&conn, "SetScreener", Some((true,).to_variant())).unwrap();
+    let before = shown.borrow().len();
+    rt.block_on(dovecot.deliver_from(USER, "INBOX", "stranger@new.test", "Hello there", "x"));
+    assert!(pump(30, || message_id("Hello there").is_some()));
+    std::thread::sleep(Duration::from_secs(1));
+    assert_eq!(shown.borrow().len(), before, "no notification for a stranger");
+    assert_eq!(status(&conn)["screener"], true);
+
     // Errors come back as D-Bus errors, not panics.
-    let nobody = Draft { to: Vec::new(), ..draft };
+    let nobody = Draft { to: Vec::new(), ..draft.clone() };
     let error = call(&conn, "Send", Some((serde_json::to_string(&nobody).unwrap(),).to_variant())).unwrap_err();
     assert!(error.message().contains("Add someone"), "{error}");
 }

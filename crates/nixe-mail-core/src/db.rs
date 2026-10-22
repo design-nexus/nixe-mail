@@ -8,7 +8,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const VERSION: i64 = 1;
+const VERSION: i64 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE accounts (
@@ -86,6 +86,32 @@ CREATE TABLE drafts (
 CREATE VIRTUAL TABLE messages_fts USING fts5 (
   subject, people, body, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 2'
 );
+";
+
+/// Version 2: sorting on this computer (see `organize`).
+const MIGRATE_2: &str = "
+ALTER TABLE messages ADD COLUMN kind TEXT NOT NULL DEFAULT 'imbox';   -- imbox, feed, paper
+ALTER TABLE messages ADD COLUMN unsubscribe TEXT;                     -- List-Unsubscribe
+CREATE TABLE senders (
+  address TEXT PRIMARY KEY,       -- lowercase
+  category TEXT,                  -- the user's choice: imbox, feed, paper
+  screened TEXT,                  -- in, out (the Screener)
+  updated INTEGER NOT NULL
+);
+CREATE TABLE snoozes (
+  thread TEXT PRIMARY KEY,
+  until INTEGER NOT NULL,
+  since INTEGER NOT NULL
+);
+CREATE TABLE followups (
+  thread TEXT PRIMARY KEY,
+  account TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  since INTEGER NOT NULL,         -- replies after this count
+  due INTEGER NOT NULL
+);
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE INDEX messages_sender ON messages (lower(from_addr), date);
 ";
 
 /// What a mailbox is for, from SPECIAL-USE or its name.
@@ -257,6 +283,22 @@ impl Db {
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version < 1 {
             conn.execute_batch(SCHEMA)?;
+        }
+        if version < 2 {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute_batch(MIGRATE_2)?;
+            // Sort what's already here (bulk headers weren't kept; lists were).
+            let rows: Vec<(i64, String, String, Option<String>)> = tx
+                .prepare("SELECT id, from_addr, subject, list_id FROM messages")?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            for (id, from, subject, list_id) in rows {
+                let kind = crate::organize::classify(&from, &subject, list_id.as_deref(), None, false);
+                tx.execute("UPDATE messages SET kind = ?2 WHERE id = ?1", params![id, kind.id()])?;
+            }
+            tx.commit()?;
+        }
+        if version < VERSION {
             conn.pragma_update(None, "user_version", VERSION)?;
         }
         Ok(Self { conn })
@@ -415,6 +457,24 @@ impl Db {
     // ---------- messages ----------
 
     /// The conversation a message with this id belongs to, if stored.
+    /// The conversation a message being sent will join (for its follow-up).
+    pub fn thread_for(&self, account: &str, message_id: &str, in_reply_to: &[String], references: &[String]) -> String {
+        thread::key(Some(message_id), in_reply_to, references, None, |id| self.thread_of(account, id))
+    }
+
+    /// Where a message's sender is sorted: the user's choice, else its kind.
+    pub fn effective_kind(&self, id: i64) -> rusqlite::Result<Option<crate::organize::Kind>> {
+        let kind: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(s.category, m.kind) FROM messages m LEFT JOIN senders s ON s.address = lower(m.from_addr) WHERE m.id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(kind.as_deref().and_then(crate::organize::Kind::from_id))
+    }
+
     fn thread_of(&self, account: &str, message_id: &str) -> Option<String> {
         self.conn
             .query_row(
@@ -467,8 +527,9 @@ impl Db {
             None => {
                 self.conn.execute(
                     "INSERT INTO messages (account, mailbox, uid, uidvalidity, modseq, message_id, gm_msgid, thread, date,
-                       from_name, from_addr, recipients, subject, preview, flags, labels, has_attachments, size, raw, list_id)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                       from_name, from_addr, recipients, subject, preview, flags, labels, has_attachments, size, raw, list_id,
+                       kind, unsubscribe)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
                     params![
                         account,
                         mailbox,
@@ -490,9 +551,12 @@ impl Db {
                         m.size,
                         m.raw,
                         p.list_id,
+                        crate::organize::classify(&from.email, &p.subject, p.list_id.as_deref(), p.list_unsubscribe.as_deref(), p.bulk).id(),
+                        p.list_unsubscribe,
                     ],
                 )?;
                 let id = self.conn.last_insert_rowid();
+                self.know_recipients(mailbox, &recipients)?;
                 self.index(id, p, m.body_text.as_deref())?;
                 if m.raw.is_some() {
                     self.put_attachments(id, p)?;
@@ -599,24 +663,58 @@ impl Db {
     }
 
     /// Conversations in some mailboxes, newest first: one row per conversation.
+    /// Conversations in some mailboxes, newest first, leaving out snoozed ones.
     pub fn list(&self, mailboxes: &[i64], limit: usize, offset: usize) -> rusqlite::Result<Vec<ListItem>> {
+        self.list_with(mailboxes, &crate::organize::Filter::default(), limit, offset)
+    }
+
+    /// Conversations in some mailboxes, newest first: one row per conversation,
+    /// sorted by its newest message's kind and sender (`organize`).
+    pub fn list_with(
+        &self,
+        mailboxes: &[i64],
+        filter: &crate::organize::Filter,
+        limit: usize,
+        offset: usize,
+    ) -> rusqlite::Result<Vec<ListItem>> {
+        use crate::organize::Screen;
         if mailboxes.is_empty() {
             return Ok(Vec::new());
         }
         let ids = mailboxes.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(",");
+        let snoozed = if filter.snoozed { "IN" } else { "NOT IN" };
+        let since = self.screener_since()?.unwrap_or(i64::MAX);
+        // Let in: chosen, written to, or heard from before the Screener began.
+        // (COALESCE: a sender with no row has a NULL choice, and NOT NULL is NULL.)
+        let cleared = format!("(COALESCE(m.screened, '') = 'in' OR (m.screened IS NULL AND m.first_seen < {since}))");
+        let mut wanted = Vec::new();
+        if let Some(kind) = filter.kind {
+            wanted.push(format!("m.cat = '{}'", kind.id()));
+        }
+        match filter.screen {
+            Screen::Any => {}
+            Screen::Cleared => wanted.push(cleared),
+            Screen::Pending => wanted.push(format!("m.screened IS NULL AND NOT {cleared}")),
+            Screen::Out => wanted.push("COALESCE(m.screened, '') = 'out'".into()),
+        }
+        let wanted = if wanted.is_empty() { String::new() } else { format!("WHERE {}", wanted.join(" AND ")) };
         let sql = format!(
-            "WITH shown AS (SELECT * FROM messages WHERE mailbox IN ({ids}) AND flags & 16 = 0),
+            "WITH shown AS (
+                    SELECT x.*, COALESCE(s.category, x.kind) AS cat, s.screened AS screened,
+                           (SELECT min(date) FROM messages f WHERE lower(f.from_addr) = lower(x.from_addr)) AS first_seen
+                    FROM messages x LEFT JOIN senders s ON s.address = lower(x.from_addr)
+                    WHERE x.mailbox IN ({ids}) AND x.flags & 16 = 0 AND x.thread {snoozed} (SELECT thread FROM snoozes)),
                   latest AS (SELECT thread, max(date) AS date, count(*) AS n, max(flags & 1 = 0) AS unread FROM shown GROUP BY thread)
              SELECT m.id, m.account, m.mailbox, m.thread, m.date, m.from_name, m.from_addr, m.subject, m.preview, m.flags,
                     m.has_attachments, l.n, l.unread
              FROM latest l JOIN shown m ON m.thread = l.thread AND m.date = l.date
+             {wanted}
              GROUP BY m.thread ORDER BY m.date DESC LIMIT ?1 OFFSET ?2"
         );
         let mut stmt = self.conn.prepare(&sql)?;
         stmt.query_map(params![limit as i64, offset as i64], list_row)?.collect()
     }
 
-    /// Full-text search over every account; newest first.
     /// People to suggest as recipients: whose name or address contains `query`,
     /// the ones the user wrote to (weighed more) and heard from, most often
     /// first. Mailing lists and no-reply senders are left out.
@@ -643,6 +741,7 @@ impl Db {
             .collect()
     }
 
+    /// Full-text search over every account; newest first.
     pub fn search(&self, query: &str, limit: usize) -> rusqlite::Result<Vec<ListItem>> {
         let fts = fts_query(query);
         if fts.is_empty() {
@@ -859,6 +958,9 @@ fn list_row(r: &rusqlite::Row) -> rusqlite::Result<ListItem> {
         unread: r.get(12)?,
     })
 }
+
+mod organize;
+pub use organize::{FollowUp, Scheduled, SenderRow};
 
 #[cfg(test)]
 mod tests;

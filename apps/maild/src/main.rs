@@ -29,6 +29,12 @@ const XML: &str = r#"<node><interface name="io.github.design_nexus.nixe.MailEngi
   <method name="ForgetAccount"><arg type="s" name="account" direction="in"/></method>
   <method name="SetActive"><arg type="b" name="active" direction="in"/></method>
   <method name="Status"><arg type="s" name="status" direction="out"/></method>
+  <method name="SendWith"><arg type="s" name="draft" direction="in"/><arg type="s" name="options" direction="in"/><arg type="s" name="result" direction="out"/></method>
+  <method name="Unschedule"><arg type="x" name="op" direction="in"/><arg type="x" name="draft" direction="out"/></method>
+  <method name="SetSender"><arg type="s" name="address" direction="in"/><arg type="s" name="choice" direction="in"/></method>
+  <method name="SetScreener"><arg type="b" name="on" direction="in"/></method>
+  <method name="Snooze"><arg type="x" name="message" direction="in"/><arg type="x" name="until" direction="in"/></method>
+  <method name="FollowUp"><arg type="x" name="message" direction="in"/><arg type="x" name="due" direction="in"/></method>
   <signal name="Changed"><arg type="s" name="what"/></signal>
 </interface></node>"#;
 
@@ -133,6 +139,56 @@ fn serve(conn: &gio::DBusConnection, engine: tokio::sync::mpsc::UnboundedSender<
                     send(Command::Active(active));
                     invocation.return_value(None);
                 }
+                "SendWith" => {
+                    let Some((json, options)) = params.get::<(String, String)>() else { return bad(invocation) };
+                    let (Ok(draft), Ok(options)) =
+                        (serde_json::from_str::<Draft>(&json), serde_json::from_str::<serde_json::Value>(&options))
+                    else {
+                        return bad(invocation);
+                    };
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    send(Command::SendWith {
+                        draft: Box::new(draft),
+                        at: options["at"].as_i64().filter(|t| *t > 0),
+                        follow_up: options["follow_up"].as_i64().filter(|t| *t > 0),
+                        reply: tx,
+                    });
+                    answer(invocation, rx, |result: String| Some((result,).to_variant()));
+                }
+                "Unschedule" => {
+                    let Some((op,)) = params.get::<(i64,)>() else { return bad(invocation) };
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    send(Command::Unschedule(op, tx));
+                    answer(invocation, rx, |draft: i64| Some((draft,).to_variant()));
+                }
+                "SetSender" => {
+                    let Some((address, choice)) = params.get::<(String, String)>() else { return bad(invocation) };
+                    let Ok(choice) = serde_json::from_str::<serde_json::Value>(&choice) else { return bad(invocation) };
+                    if !nixe_mail_core::send::valid_address(&address) {
+                        return bad(invocation);
+                    }
+                    // A key that's there sets that part (null clears it); one that isn't leaves it.
+                    let kind = choice.get("kind").map(|k| k.as_str().and_then(nixe_mail_core::organize::Kind::from_id));
+                    let screened =
+                        choice.get("screened").map(|v| v.as_str().filter(|s| matches!(*s, "in" | "out")).map(str::to_string));
+                    send(Command::SetSender { address, kind, screened });
+                    invocation.return_value(None);
+                }
+                "SetScreener" => {
+                    let Some((on,)) = params.get::<(bool,)>() else { return bad(invocation) };
+                    send(Command::SetScreener(on));
+                    invocation.return_value(None);
+                }
+                "Snooze" => {
+                    let Some((id, until)) = params.get::<(i64, i64)>() else { return bad(invocation) };
+                    send(Command::Snooze(id, until));
+                    invocation.return_value(None);
+                }
+                "FollowUp" => {
+                    let Some((id, due)) = params.get::<(i64, i64)>() else { return bad(invocation) };
+                    send(Command::FollowUp(id, due));
+                    invocation.return_value(None);
+                }
                 "Status" => {
                     let status = engine::STATUS.lock().ok().and_then(|s| s.clone()).unwrap_or_default();
                     invocation.return_value(Some(&(serde_json::to_string(&status).unwrap_or_default(),).to_variant()));
@@ -173,6 +229,7 @@ fn emit(event: Event) {
                 let _ = conn.emit_signal(None, PATH, INTERFACE, "Changed", Some(&(what,).to_variant()));
             }
             Event::NewMail(list) => notify(&conn, &list),
+            Event::Notice(summary, body, message) => show(&conn, &summary, &body, message),
         }
     });
 }
@@ -188,13 +245,17 @@ fn notify(conn: &gio::DBusConnection, list: &[(i64, String, String)]) {
             many.iter().take(3).map(|(_, f, s)| format!("{f}: {s}")).collect::<Vec<_>>().join("\n"),
         ),
     };
-    let message = list.iter().map(|(id, _, _)| *id).max().unwrap_or(0);
+    let message = list.iter().map(|(id, _, _)| *id).max();
+    show(conn, &summary, &body, message);
+}
+
+/// Shows a notification; clicking it opens `message` in Mail.
+fn show(conn: &gio::DBusConnection, summary: &str, body: &str, message: Option<i64>) {
     let mut hints = std::collections::HashMap::<String, glib::Variant>::new();
     hints.insert("desktop-entry".into(), "io.github.design_nexus.nixe.Mail".to_variant());
     hints.insert("category".into(), "email.arrived".to_variant());
     let actions: Vec<String> = vec!["default".into(), "Open".into()];
-    let params =
-        ("Mail", 0u32, "io.github.design_nexus.nixe.Mail", summary.as_str(), body.as_str(), actions, hints, -1i32).to_variant();
+    let params = ("Mail", 0u32, "io.github.design_nexus.nixe.Mail", summary, body, actions, hints, -1i32).to_variant();
     conn.call(
         Some("org.freedesktop.Notifications"),
         "/org/freedesktop/Notifications",
@@ -206,7 +267,7 @@ fn notify(conn: &gio::DBusConnection, list: &[(i64, String, String)]) {
         5000,
         gio::Cancellable::NONE,
         move |r| {
-            if let Some(id) = r.ok().and_then(|v| v.get::<(u32,)>()).map(|(id,)| id) {
+            if let (Some(id), Some(message)) = (r.ok().and_then(|v| v.get::<(u32,)>()).map(|(id,)| id), message) {
                 SHOWN.with(|s| s.borrow_mut().insert(id, message));
             }
         },
