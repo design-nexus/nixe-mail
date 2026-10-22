@@ -149,6 +149,16 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
         })
     };
     rediscover(&state);
+    // Stored mail sorted by the current rules (after an upgrade).
+    {
+        let s = state.borrow();
+        let store = &s.store;
+        match s.db.resort(|raw| store.get(raw).ok().and_then(|bytes| nixe_mail_core::mime::parse(&bytes))) {
+            Ok(0) => {}
+            Ok(n) => eprintln!("nixe-maild: sorted {n} messages again"),
+            Err(e) => eprintln!("nixe-maild: sorting: {e}"),
+        }
+    }
     events(Event::Changed("status"));
 
     // Snoozes, follow-ups and scheduled mail.

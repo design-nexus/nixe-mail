@@ -83,13 +83,8 @@ const PAPER_SUBJECT: &[&str] = &[
     "your account",
 ];
 
-/// Local parts of machine senders.
-const PAPER_SENDER: &[&str] = &[
-    "noreply",
-    "no-reply",
-    "no_reply",
-    "donotreply",
-    "do-not-reply",
+/// Words in sender addresses that mark an account notice or a transaction.
+const ACCOUNT_SENDER: &[&str] = &[
     "receipts",
     "receipt",
     "billing",
@@ -98,37 +93,72 @@ const PAPER_SENDER: &[&str] = &[
     "orders",
     "order",
     "payments",
+    "payment",
     "shipping",
     "shipment",
-    "notifications",
-    "notification",
-    "alerts",
-    "alert",
     "security",
     "account",
     "accounts",
-    "auto-confirm",
-    "confirm",
+    "alerts",
+    "alert",
     "bookings",
     "reservations",
+    "verification",
+    "verify",
+    "auto-confirm",
+    "confirm",
+    "statements",
     "mailer-daemon",
 ];
 
-/// The kind of a message from what it says about itself.
+/// Words in sender addresses that mark a machine.
+const NOREPLY_SENDER: &[&str] =
+    &["noreply", "no-reply", "no_reply", "donotreply", "do-not-reply", "notifications", "notification", "notify", "automated"];
+
+/// Words in sender addresses that mark newsletters and marketing.
+const FEED_SENDER: &[&str] = &[
+    "newsletter",
+    "newsletters",
+    "news",
+    "digest",
+    "marketing",
+    "promo",
+    "promos",
+    "promotions",
+    "offers",
+    "deals",
+    "updates",
+    "info",
+    "hello",
+    "team",
+    "engage",
+    "community",
+];
+
+/// The kind of a message from what it says about itself: what the subject
+/// says first, then who sent it and whether it came to a list.
 pub fn classify(from: &str, subject: &str, list_id: Option<&str>, unsubscribe: Option<&str>, bulk: bool) -> Kind {
     let subject = subject.to_lowercase();
-    let local = from.split('@').next().unwrap_or("").to_lowercase();
+    let (local, domain) = from.split_once('@').unwrap_or((from, ""));
+    let (local, domain) = (local.to_lowercase(), domain.to_lowercase());
     let local = local.split('+').next().unwrap_or("");
-    let transactional = PAPER_SUBJECT.iter().any(|w| subject.contains(w));
-    let machine =
-        PAPER_SENDER.iter().any(|w| local == *w || local.starts_with(&format!("{w}-")) || local.starts_with(&format!("{w}.")));
-    let listy = list_id.is_some() || unsubscribe.is_some() || bulk;
-    match (transactional, listy, machine) {
-        // A receipt often carries List-Unsubscribe too; what it says wins.
-        (true, _, _) => Kind::Paper,
-        (false, true, _) => Kind::Feed,
-        (false, false, true) => Kind::Paper,
-        _ => Kind::Imbox,
+    // Whole words of the address: "google-health-noreply" has "noreply".
+    let words: Vec<&str> = local.split(['-', '.', '_']).filter(|w| !w.is_empty()).collect();
+    let has = |list: &[&str]| list.contains(&local) || words.iter().any(|w| list.contains(w));
+    // Bulk senders' own subdomains (mail.example.com, engage.example.com).
+    let bulk_domain = domain.matches('.').count() >= 2
+        && ["mail.", "email.", "e.", "engage.", "news.", "newsletter.", "marketing.", "info."]
+            .iter()
+            .any(|d| domain.starts_with(d));
+    let listy = list_id.is_some() || unsubscribe.is_some() || bulk || has(FEED_SENDER) || bulk_domain;
+    if PAPER_SUBJECT.iter().any(|w| subject.contains(w)) || has(ACCOUNT_SENDER) {
+        Kind::Paper
+    } else if listy {
+        Kind::Feed
+    } else if has(NOREPLY_SENDER) {
+        Kind::Paper
+    } else {
+        Kind::Imbox
     }
 }
 
@@ -190,6 +220,16 @@ mod tests {
         assert_eq!(classify("ordering@example.com", "Thanks", None, None, false), Kind::Imbox, "whole words only");
         assert_eq!(classify("sam@example.com", "Your verification code is 123456", None, None, false), Kind::Paper);
         assert_eq!(classify("robot@ci.example", "Build failed", None, None, true), Kind::Feed);
+        assert_eq!(classify("google-health-noreply@google.com", "Weekly progress", None, None, false), Kind::Paper);
+        assert_eq!(classify("noreply-accounts@google.com", "Tips", None, Some("<https://u.example>"), false), Kind::Paper);
+        assert_eq!(
+            classify("googleone-noreply@google.com", "More storage", None, Some("<https://u.example>"), false),
+            Kind::Feed
+        );
+        assert_eq!(classify("newsletter@thegamer.com", "Top stories", None, None, false), Kind::Feed);
+        assert_eq!(classify("mail@mail.creditkarma.com", "Your score changed", None, None, false), Kind::Feed);
+        assert_eq!(classify("sam@mail.example", "Lunch", None, None, false), Kind::Imbox, "a two-part domain is someone's own");
+        assert_eq!(classify("reader@contact.example", "Hi", None, None, false), Kind::Imbox);
     }
 
     #[test]

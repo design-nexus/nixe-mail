@@ -45,7 +45,44 @@ pub struct FollowUp {
     pub due: i64,
 }
 
+/// A stored message as sorting sees it: id, sender, subject, List-Id,
+/// List-Unsubscribe, store name.
+type Stored = (i64, String, String, Option<String>, Option<String>, Option<String>);
+
+/// Bumped when `classify` changes, so stored mail is sorted again.
+pub const SORT_VERSION: i64 = 2;
+
 impl Db {
+    /// Sorts stored mail again when the rules changed since it was sorted.
+    /// `headers` reads a stored message (the store isn't the database's);
+    /// messages without a stored body use what the database kept.
+    pub fn resort(&self, headers: impl Fn(&str) -> Option<crate::mime::Parsed>) -> rusqlite::Result<usize> {
+        let done: i64 = self.setting("sort_version")?.and_then(|v| v.parse().ok()).unwrap_or(0);
+        if done >= SORT_VERSION {
+            return Ok(0);
+        }
+        let rows: Vec<Stored> = self
+            .conn
+            .prepare("SELECT id, from_addr, subject, list_id, unsubscribe, raw FROM messages")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let tx = self.conn.unchecked_transaction()?;
+        for (id, from, subject, list_id, unsubscribe, raw) in &rows {
+            let parsed = raw.as_deref().and_then(&headers);
+            let unsubscribe = parsed.as_ref().and_then(|p| p.list_unsubscribe.clone()).or(unsubscribe.clone());
+            let list_id = parsed.as_ref().and_then(|p| p.list_id.clone()).or(list_id.clone());
+            let bulk = parsed.as_ref().is_some_and(|p| p.bulk);
+            let kind = crate::organize::classify(from, subject, list_id.as_deref(), unsubscribe.as_deref(), bulk);
+            tx.execute("UPDATE messages SET kind = ?2, unsubscribe = ?3 WHERE id = ?1", params![id, kind.id(), unsubscribe])?;
+        }
+        tx.execute(
+            "INSERT INTO settings (key, value) VALUES ('sort_version', ?1) ON CONFLICT (key) DO UPDATE SET value = ?1",
+            [SORT_VERSION.to_string()],
+        )?;
+        tx.commit()?;
+        Ok(rows.len())
+    }
+
     // ---------- senders and the Screener ----------
 
     /// Records the user's choice for a sender. `None` leaves that part as it is;

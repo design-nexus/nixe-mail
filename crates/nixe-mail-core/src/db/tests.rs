@@ -341,3 +341,25 @@ fn snoozes_follow_ups_and_scheduled_mail() {
     assert!(db.scheduled(20).unwrap().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn stored_mail_is_sorted_again_once() {
+    let (db, dir) = db();
+    db.upsert_account("acc", "me@example.com", "").unwrap();
+    let inbox = db.upsert_mailbox("acc", "INBOX", None, Some(Role::Inbox)).unwrap();
+    let mut m = from(1, "a@x", "hello@shop.example", "Spring sale", 10);
+    m.raw = Some("stored".into());
+    db.put_message("acc", inbox, &m).unwrap();
+    db.conn().execute("UPDATE messages SET kind = 'imbox', unsubscribe = NULL", []).unwrap();
+    db.conn().execute("DELETE FROM settings WHERE key = 'sort_version'", []).unwrap();
+    let headers = |name: &str| {
+        (name == "stored")
+            .then(|| crate::mime::Parsed { list_unsubscribe: Some("<https://shop.example/u>".into()), ..Default::default() })
+    };
+    assert_eq!(db.resort(headers).unwrap(), 1);
+    let (kind, unsub): (String, Option<String>) =
+        db.conn().query_row("SELECT kind, unsubscribe FROM messages", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+    assert_eq!((kind.as_str(), unsub.as_deref()), ("feed", Some("<https://shop.example/u>")));
+    assert_eq!(db.resort(headers).unwrap(), 0, "only once per version of the rules");
+    let _ = std::fs::remove_dir_all(dir);
+}
