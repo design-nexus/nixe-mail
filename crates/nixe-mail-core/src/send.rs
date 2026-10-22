@@ -15,11 +15,29 @@ use serde::{Deserialize, Serialize};
 pub struct FileAttachment {
     pub name: String,
     pub mime: String,
+    /// Base64 in JSON (drafts and the engine's D-Bus calls).
+    #[serde(with = "base64_bytes")]
     pub bytes: Vec<u8>,
+}
+
+mod base64_bytes {
+    use base64::Engine;
+    use base64::engine::general_purpose::STANDARD;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        STANDARD.decode(text).map_err(serde::de::Error::custom)
+    }
 }
 
 /// A message being written.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Draft {
     pub account: String,
     pub from: Person,
@@ -73,6 +91,114 @@ impl Draft {
         }
         m.write_to_vec().unwrap_or_default()
     }
+}
+
+/// Looks like an address a server will take: one `@`, something on both
+/// sides, no spaces or brackets.
+pub fn valid_address(email: &str) -> bool {
+    let Some((local, domain)) = email.split_once('@') else { return false };
+    !local.is_empty()
+        && !domain.is_empty()
+        && !domain.contains('@')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !email.chars().any(|c| c.is_whitespace() || "<>(),;:\\\"[]".contains(c))
+}
+
+/// Recipients as typed: `Sam Lee <sam@example.com>, ann@example.com`.
+/// Commas inside quotes or angle brackets don't split. An entry that isn't an
+/// address comes back as the error.
+pub fn parse_people(text: &str) -> Result<Vec<Person>, String> {
+    let mut parts = Vec::new();
+    let (mut current, mut quoted, mut angle) = (String::new(), false, false);
+    for c in text.chars() {
+        match c {
+            '"' => quoted = !quoted,
+            '<' if !quoted => angle = true,
+            '>' if !quoted => angle = false,
+            ',' | ';' if !quoted && !angle => {
+                parts.push(std::mem::take(&mut current));
+                continue;
+            }
+            _ => {}
+        }
+        current.push(c);
+    }
+    parts.push(current);
+    let mut out: Vec<Person> = Vec::new();
+    for part in parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+        let person = match (part.rfind('<'), part.rfind('>')) {
+            (Some(open), Some(close)) if open < close => Person {
+                name: part[..open].trim().trim_matches('"').trim().to_string(),
+                email: part[open + 1..close].trim().to_string(),
+            },
+            _ => Person { name: String::new(), email: part.trim_matches(['<', '>']).to_string() },
+        };
+        if !valid_address(&person.email) {
+            return Err(part.to_string());
+        }
+        if !out.iter().any(|p| p.email.eq_ignore_ascii_case(&person.email)) {
+            out.push(person);
+        }
+    }
+    Ok(out)
+}
+
+/// The other way round, for showing recipients in an entry.
+pub fn people_text(people: &[Person]) -> String {
+    people
+        .iter()
+        .map(|p| {
+            if p.name.is_empty() {
+                p.email.clone()
+            } else if p.name.contains([',', ';', '"', '<', '>']) {
+                format!("\"{}\" <{}>", p.name.replace('"', ""), p.email)
+            } else {
+                format!("{} <{}>", p.name, p.email)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(b) = u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("zz"), 16)
+        {
+            out.push(b);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A draft from a `mailto:` link (RFC 6068): recipients, `cc`, `bcc`,
+/// `subject` and `body`. Other headers are ignored.
+pub fn parse_mailto(uri: &str) -> Draft {
+    let rest = uri.trim().strip_prefix("mailto:").or_else(|| uri.trim().strip_prefix("MAILTO:")).unwrap_or(uri.trim());
+    let (to, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let people = |text: &str| parse_people(&percent_decode(text)).unwrap_or_default();
+    let mut draft = Draft { to: people(to), ..Draft::default() };
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        match key.to_ascii_lowercase().as_str() {
+            "to" => draft.to.extend(people(value)),
+            "cc" => draft.cc.extend(people(value)),
+            "bcc" => draft.bcc.extend(people(value)),
+            "subject" => draft.subject = percent_decode(value),
+            "body" => draft.body = percent_decode(value).replace("\r\n", "\n"),
+            _ => {}
+        }
+    }
+    draft
 }
 
 /// A new Message-ID for a message from `from` (`random@domain`).
@@ -141,12 +267,7 @@ pub fn reply(original: &Parsed, all: bool, me: &[String], from: Person, account:
 
 /// A forward with the original's text and attachments.
 pub fn forward(original: &Parsed, attachments: Vec<FileAttachment>, from: Person, account: &str, when: &str) -> Draft {
-    let people = |ps: &[Person]| {
-        ps.iter()
-            .map(|p| if p.name.is_empty() { p.email.clone() } else { format!("{} <{}>", p.name, p.email) })
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
+    let people = people_text;
     let header = format!(
         "\n\n---------- Forwarded message ----------\nFrom: {}\nDate: {when}\nSubject: {}\nTo: {}\n\n",
         original.from.as_ref().map(|p| people(std::slice::from_ref(p))).unwrap_or_default(),
@@ -278,6 +399,50 @@ mod tests {
         assert_eq!(f.subject, "Fwd: Lunch");
         assert!(f.body.contains("From: Sam <sam@example.com>") && f.body.contains("Ramen?"));
         assert!(f.to.is_empty());
+    }
+
+    #[test]
+    fn typed_recipients() {
+        let people =
+            parse_people("Sam Lee <sam@example.com>, ann@example.com; \"Lee, Bo\" <bo@example.com>,, SAM@example.com").unwrap();
+        assert_eq!(
+            people,
+            vec![person("Sam Lee", "sam@example.com"), person("", "ann@example.com"), person("Lee, Bo", "bo@example.com")]
+        );
+        assert_eq!(parse_people("sam@example.com, not an address"), Err("not an address".into()));
+        assert_eq!(parse_people("  ").unwrap(), vec![]);
+        assert_eq!(parse_people(&people_text(&people)).unwrap(), people);
+        assert!(!valid_address("a@b@c") && !valid_address("@x") && !valid_address("a b@x") && valid_address("me@localhost"));
+    }
+
+    #[test]
+    fn mailto_links() {
+        let d = parse_mailto(
+            "mailto:sam@example.com,ann@example.com?cc=bo%40example.com&subject=Caf%C3%A9%20plans&body=Line%201%0D%0ALine%202&x-other=1",
+        );
+        assert_eq!(d.to.iter().map(|p| p.email.as_str()).collect::<Vec<_>>(), ["sam@example.com", "ann@example.com"]);
+        assert_eq!(d.cc[0].email, "bo@example.com");
+        assert_eq!(d.subject, "Café plans");
+        assert_eq!(d.body, "Line 1\nLine 2");
+        assert_eq!(parse_mailto("mailto:?subject=Hi").to, vec![]);
+        assert_eq!(parse_mailto("mailto:a@x%").to[0].email, "a@x%");
+    }
+
+    #[test]
+    fn drafts_travel_as_json_with_base64_files() {
+        let d = Draft {
+            attachments: vec![FileAttachment {
+                name: "a.bin".into(),
+                mime: "application/octet-stream".into(),
+                bytes: vec![0, 255, 7],
+            }],
+            ..Draft::default()
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(json.contains("\"AP8H\""), "{json}");
+        assert_eq!(serde_json::from_str::<Draft>(&json).unwrap(), d);
+        // Missing fields are fine (older drafts, other callers).
+        assert_eq!(serde_json::from_str::<Draft>(r#"{"subject":"Hi"}"#).unwrap().subject, "Hi");
     }
 
     #[test]

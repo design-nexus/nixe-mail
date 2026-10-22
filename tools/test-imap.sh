@@ -3,11 +3,21 @@
 # an SMTP sink inside the tests, then nixe-maild on a private session bus.
 # Everything lives in a scratch directory and runs as this user; nothing
 # touches real mail or system services.
+#
+#   tools/test-imap.sh [TEST FILTER]   run the tests
+#   tools/test-imap.sh --run CMD…       run CMD against the same server instead
 set -euo pipefail
 cd "$(dirname "$0")/.."
+run=()
+if [[ ${1:-} == --run ]]; then
+  shift
+  run=("$@")
+fi
 command -v dovecot >/dev/null || { echo "Install dovecot to run these tests." >&2; exit 1; }
-cargo test --locked -p nixe-mail-core --features testing --test imap --no-run
-cargo test --locked -p nixe-maild --test session --no-run
+if [[ ${#run[@]} == 0 ]]; then
+  cargo test --locked -p nixe-mail-core --features testing --test imap --no-run
+  cargo test --locked -p nixe-maild --test session --no-run
+fi
 
 # Short path: Dovecot's sockets must fit in a Unix socket name.
 dir=$(mktemp -d /tmp/nm.XXXXXX)
@@ -102,6 +112,10 @@ export NIXE_MAIL_TEST_DIR=$dir NIXE_MAIL_TEST_IMAP=$imap NIXE_MAIL_TEST_IMAPS=$i
 export NIXE_MAIL_EXTRA_CA=$dir/ca.pem NIXE_MAIL_TEST_CERT=$dir/cert.pem NIXE_MAIL_TEST_KEY=$dir/key.pem
 export NIXE_MAIL_TEST_START="$start" NIXE_MAIL_TEST_STOP="kill \$(cat $dir/run/master.pid)"
 status=0
+if [[ ${#run[@]} -gt 0 ]]; then
+  "${run[@]}" || status=$?
+  exit "$status"
+fi
 cargo test --locked -p nixe-mail-core --features testing --test imap -- --ignored --test-threads=1 "$@" || status=$?
 # The engine, on a private session bus with scratch XDG directories.
 if [[ $status == 0 ]]; then

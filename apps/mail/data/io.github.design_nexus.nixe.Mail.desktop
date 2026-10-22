@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=Mail
+GenericName=Email
+Comment=Every mail account in one inbox
+Exec=nixe-mail %u
+Icon=io.github.design_nexus.nixe.Mail
+Terminal=false
+Categories=Network;Email;GTK;
+Keywords=mail;email;inbox;imap;smtp;
+MimeType=x-scheme-handler/mailto;
+StartupNotify=true
+StartupWMClass=io.github.design_nexus.nixe.Mail
+Actions=compose;
+
+[Desktop Action compose]
+Name=New Message
+Exec=nixe-mail --compose
