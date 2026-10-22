@@ -695,6 +695,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "glimpse-plugin-sdk"
+version = "0.1.0"
+source = "git+https://github.com/design-nexus/nixe-glimpse.git?rev=7da103687afe03d14879635c46a0d5a69f83754d#7da103687afe03d14879635c46a0d5a69f83754d"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "gobject-sys"
 version = "0.22.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1307,6 +1317,16 @@ dependencies = [
  "sha2",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "nixe-mail-glimpse"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glimpse-plugin-sdk",
+ "nixe-mail-core",
+ "serde_json",
 ]
 
 [[package]]

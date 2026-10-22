@@ -1,12 +1,14 @@
 //! Mail — every mail account in one inbox, for Omarchy.
 
 mod compose;
+mod control;
 mod data;
 mod engine;
 mod prefs;
 mod reader;
 mod settings_dialog;
 mod settings_page;
+mod suggest;
 mod theme;
 mod widgets;
 mod window;
@@ -20,6 +22,7 @@ const USAGE: &str = "Usage: nixe-mail [OPTIONS] [mailto:…]\n\
 \n\
   mailto:ADDRESS  write a message (from a mailto: link)\n\
   --compose       write a new message\n\
+  --message ID    show a message's conversation\n\
   --section ID    open inbox, drafts, sent, archive, junk, trash, mailbox:ID or settings\n\
   --toggle        close the window if it's open, otherwise open it\n";
 
@@ -35,7 +38,11 @@ fn main() -> glib::ExitCode {
         unsafe { std::env::set_var("GSK_RENDERER", "ngl") };
     }
     let app = gtk::Application::builder().application_id(APP_ID).flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE).build();
-    app.connect_startup(|_| theme::install());
+    app.connect_startup(|app| {
+        theme::install();
+        // Nixe Assistant searches, reads and starts messages through this.
+        nixe_core::control::serve_async(app, control::tools(), control::handle);
+    });
     app.connect_command_line(|app, cl| {
         let argv: Vec<String> = cl.arguments().iter().map(|a| a.to_string_lossy().to_string()).collect();
         let has = |flag: &str| argv.iter().any(|a| a == flag);
@@ -48,6 +55,11 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::SUCCESS;
         }
         window::present(app, value("--section").as_deref());
+        if let Some(id) = value("--message").and_then(|v| v.parse::<i64>().ok())
+            && !window::open_message(id)
+        {
+            window::toast("That message isn't on this computer any more.");
+        }
         if let Some(link) = argv.iter().skip(1).find(|a| a.to_ascii_lowercase().starts_with("mailto:")) {
             compose::open(compose::Start::Mailto(link.clone()));
         } else if has("--compose") {

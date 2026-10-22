@@ -29,6 +29,13 @@ pub enum Start {
     Forward(i64),
     /// A saved draft.
     Draft(i64),
+    /// Filled in by someone else (Assistant): recipients, subject, text.
+    Prepared(Box<Draft>),
+    /// A reply with suggested recipients, subject or text over the usual ones.
+    ReplyWith {
+        message: i64,
+        draft: Box<Draft>,
+    },
 }
 
 struct Compose {
@@ -64,13 +71,15 @@ type Shared = Rc<Compose>;
 pub fn open(start: Start) {
     // Reply and forward need the original's body.
     let original = match &start {
-        Start::Reply { message, .. } | Start::Forward(message) => match data::message(*message) {
-            Some(row) => Some(row),
-            None => {
-                window::toast("That message is gone.");
-                return;
+        Start::Reply { message, .. } | Start::Forward(message) | Start::ReplyWith { message, .. } => {
+            match data::message(*message) {
+                Some(row) => Some(row),
+                None => {
+                    window::toast("That message is gone.");
+                    return;
+                }
             }
-        },
+        }
         _ => None,
     };
     if let Some(row) = &original
@@ -131,6 +140,31 @@ fn prepare(
             draft.account = account;
             draft.body.push_str(&signature());
             (Some(draft), None, None, "New message")
+        }
+        Start::Prepared(given) => {
+            let account = default_account(accounts);
+            let mut draft = *given;
+            draft.from = account_person(accounts, &account);
+            draft.account = account;
+            draft.body.push_str(&signature());
+            (Some(draft), None, None, "New message")
+        }
+        Start::ReplyWith { draft: given, .. } => {
+            let (Some(row), Some(p)) = (original, parsed) else { return (None, None, None, "") };
+            let me = data::own_addresses();
+            let from = account_person(accounts, &row.account);
+            let mut draft = send::reply(&p, false, &me, from, &row.account, &window::full_date(row.date));
+            if !given.to.is_empty() {
+                draft.to = given.to;
+            }
+            if !given.cc.is_empty() {
+                draft.cc = given.cc;
+            }
+            if !given.subject.trim().is_empty() {
+                draft.subject = given.subject;
+            }
+            draft.body = format!("{}{}{}", given.body.trim_end(), signature(), draft.body);
+            (Some(draft), None, Some(row.id), "Reply")
         }
         Start::Reply { all, .. } => {
             let (Some(row), Some(p)) = (original, parsed) else { return (None, None, None, "") };
@@ -310,6 +344,9 @@ fn build(draft: Draft, draft_id: Option<i64>, answering: Option<i64>, title: &st
     });
     redraw_files(&c);
 
+    for entry in [&c.to, &c.cc, &c.bcc] {
+        crate::suggest::attach(entry);
+    }
     for entry in [&c.to, &c.cc, &c.bcc, &c.subject] {
         let c2 = c.clone();
         entry.connect_changed(move |_| changed(&c2));
@@ -373,6 +410,9 @@ fn install_keys(c: &Shared) {
     let keys = gtk::EventControllerKey::new();
     let c2 = c.clone();
     keys.connect_key_pressed(move |_, key, _, mods| {
+        if crate::suggest::showing() && !mods.contains(gdk::ModifierType::CONTROL_MASK) {
+            return glib::Propagation::Proceed;
+        }
         let ctrl = mods.contains(gdk::ModifierType::CONTROL_MASK);
         let shift = mods.contains(gdk::ModifierType::SHIFT_MASK);
         match key {

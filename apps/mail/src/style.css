@@ -229,3 +229,16 @@ window.mail-window .reader-bar button {
   padding: 0;
   margin-right: 4px;
 }
+
+.suggestions > contents {
+  padding: 4px;
+  min-width: 320px;
+}
+
+.suggestion {
+  padding: 6px 10px;
+}
+
+.suggestion-name {
+  font-weight: 600;
+}

@@ -119,8 +119,18 @@ fn syncs_pushes_new_mail_sends_and_saves_changes() {
         "imap": server(dovecot.port), "smtp": server(sink.port), "password": "secret",
     }]);
     std::fs::write(&accounts, list.to_string()).unwrap();
+    // Stands in for the Mail window: notes what it was asked to open.
+    let dir = std::path::PathBuf::from(env("NIXE_MAIL_TEST_DIR"));
+    let opened = dir.join("opened");
+    let program = dir.join("fake-mail");
+    std::fs::write(&program, format!("#!/bin/sh\necho \"$@\" > {}\n", opened.display())).unwrap();
+    std::fs::set_permissions(&program, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let _maild = Killed(
-        std::process::Command::new(env!("CARGO_BIN_EXE_nixe-maild")).env("NIXE_MAIL_TEST_ACCOUNTS", &accounts).spawn().unwrap(),
+        std::process::Command::new(env!("CARGO_BIN_EXE_nixe-maild"))
+            .env("NIXE_MAIL_TEST_ACCOUNTS", &accounts)
+            .env("NIXE_MAIL_PROGRAM", &program)
+            .spawn()
+            .unwrap(),
     );
 
     // The first sync.
@@ -133,6 +143,21 @@ fn syncs_pushes_new_mail_sends_and_saves_changes() {
     assert!(pump(30, || !shown.borrow().is_empty()), "no notification for new mail");
     assert_eq!(shown.borrow()[0], ("Sam Lee".to_string(), "Tickets".to_string()));
     assert!(pump(10, || message_id("Tickets").is_some()));
+
+    // Clicking it opens Mail on that message.
+    conn.emit_signal(
+        None,
+        "/org/freedesktop/Notifications",
+        "org.freedesktop.Notifications",
+        "ActionInvoked",
+        Some(&(1u32, "default").to_variant()),
+    )
+    .unwrap();
+    let tickets = message_id("Tickets").unwrap();
+    assert!(
+        pump(10, || std::fs::read_to_string(&opened).is_ok_and(|t| t.trim() == format!("--message {tickets}"))),
+        "notification click didn't open Mail"
+    );
 
     // Not while the window is in front.
     call(&conn, "SetActive", Some((true,).to_variant())).unwrap();

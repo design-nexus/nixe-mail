@@ -292,6 +292,24 @@ fn searching(u: &Ui) -> bool {
     u.search.is_visible() && !u.search.text().trim().is_empty()
 }
 
+/// Shows a message's conversation (from Glimpse, Assistant or a notification).
+/// False when there's no such message.
+pub fn open_message(id: i64) -> bool {
+    let Some(m) = data::message(id) else { return false };
+    let Some(ui) = ui() else { return false };
+    show_view(View::Mailbox(m.mailbox));
+    ui.borrow_mut().open = Some(m.thread.clone());
+    reload();
+    let position = ui.borrow().rows.iter().position(|r| r.key() == m.thread);
+    if let Some(p) = position {
+        select(p as u32);
+    }
+    if let Some(w) = window() {
+        w.present();
+    }
+    true
+}
+
 fn show_view(view: View) {
     let Some(ui) = ui() else { return };
     prefs::update(|p| p.last_section = view.id());

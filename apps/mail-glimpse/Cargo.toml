@@ -1,0 +1,18 @@
+[package]
+name = "nixe-mail-glimpse"
+version = "0.1.0"
+description = "Glimpse search plugin for the mail on this computer"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "nixe-mail-glimpse"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+glimpse-plugin-sdk = { git = "https://github.com/design-nexus/nixe-glimpse.git", rev = "7da103687afe03d14879635c46a0d5a69f83754d" }
+nixe-mail-core = { path = "../../crates/nixe-mail-core" }
+serde_json = "1"

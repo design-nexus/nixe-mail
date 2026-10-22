@@ -48,7 +48,8 @@ pub enum Event {
     /// Something to re-read: `messages`, `mailboxes` or `status`.
     Changed(&'static str),
     /// New unread mail in an inbox while the window isn't in front.
-    NewMail(Vec<(String, String)>),
+    /// (message id, sender, subject).
+    NewMail(Vec<(i64, String, String)>),
 }
 
 pub fn start(events: impl Fn(Event) + Send + 'static) -> mpsc::UnboundedSender<Command> {
@@ -293,11 +294,11 @@ async fn sync_account(state: &Shared, account: &MailAccount, events: &Rc<dyn Fn(
         Ok(report) => {
             s.offline.remove(&account.id);
             let _ = s.db.set_account_state(&account.id, Some(now()), None);
-            let new_mail: Vec<(String, String)> = report
+            let new_mail: Vec<(i64, String, String)> = report
                 .new_in_inbox
                 .iter()
                 .filter_map(|id| s.db.message(*id).ok().flatten())
-                .map(|m| (if m.from_name.is_empty() { m.from_addr } else { m.from_name }, m.subject))
+                .map(|m| (m.id, if m.from_name.is_empty() { m.from_addr } else { m.from_name }, m.subject))
                 .collect();
             let active = s.active;
             let start_idle = !s.idling.contains(&account.id);

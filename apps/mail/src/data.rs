@@ -105,6 +105,11 @@ pub fn drafts() -> Vec<(i64, String, serde_json::Value, i64)> {
     with(|db| db.drafts())
 }
 
+/// People from the user's mail to suggest as recipients.
+pub fn people(query: &str, limit: usize) -> Vec<nixe_mail_core::mime::Person> {
+    with(|db| db.people(query, limit))
+}
+
 pub fn store() -> Store {
     Store::new(paths().store())
 }

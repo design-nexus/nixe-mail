@@ -172,3 +172,28 @@ fn drafts_save_and_delete() {
     assert!(db.drafts().unwrap().is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn people_to_suggest() {
+    let (db, dir) = db();
+    db.upsert_account("acc", "me@example.com", "Me").unwrap();
+    let inbox = db.upsert_mailbox("acc", "INBOX", None, Some(Role::Inbox)).unwrap();
+    let sent = db.upsert_mailbox("acc", "Sent", None, Some(Role::Sent)).unwrap();
+    // Sam wrote twice; I wrote to Samantha once (counts three times).
+    db.put_message("acc", inbox, &msg(1, "a@x", None, "Hi", 10, "x")).unwrap();
+    db.put_message("acc", inbox, &msg(2, "b@x", None, "Hi again", 20, "x")).unwrap();
+    let mut mine = msg(3, "c@x", None, "Plans", 30, "x");
+    mine.parsed.from = Some(Person { name: "Me".into(), email: "me@example.com".into() });
+    mine.parsed.to = vec![Person { name: "Samantha Ray".into(), email: "sam.ray@example.org".into() }];
+    db.put_message("acc", sent, &mine).unwrap();
+    let mut robot = msg(4, "d@x", None, "Receipt", 40, "x");
+    robot.parsed.from = Some(Person { name: "Shop".into(), email: "noreply@samshop.example".into() });
+    db.put_message("acc", inbox, &robot).unwrap();
+
+    let found = db.people("sam", 5).unwrap();
+    assert_eq!(found.iter().map(|p| p.email.as_str()).collect::<Vec<_>>(), ["sam.ray@example.org", "sam@example.com"]);
+    assert_eq!(found[0].name, "Samantha Ray");
+    assert!(db.people("%", 5).unwrap().is_empty(), "wildcards are literal");
+    assert!(db.people(" ", 5).unwrap().is_empty());
+    let _ = std::fs::remove_dir_all(dir);
+}

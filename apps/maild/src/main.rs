@@ -34,6 +34,8 @@ const XML: &str = r#"<node><interface name="io.github.design_nexus.nixe.MailEngi
 
 thread_local! {
     static CONN: RefCell<Option<gio::DBusConnection>> = const { RefCell::new(None) };
+    /// Notifications shown, and the message each opens.
+    static SHOWN: RefCell<std::collections::HashMap<u32, i64>> = RefCell::new(std::collections::HashMap::new());
 }
 
 const USAGE: &str = "Usage: nixe-maild\n\n  Syncs and sends mail for Nixe Mail. Runs as a user service.\n";
@@ -67,6 +69,7 @@ fn main() {
 
 fn serve(conn: &gio::DBusConnection, engine: tokio::sync::mpsc::UnboundedSender<Command>) {
     CONN.with(|c| *c.borrow_mut() = Some(conn.clone()));
+    watch_notifications(conn);
     let info = gio::DBusNodeInfo::for_xml(XML).expect("interface XML").lookup_interface(INTERFACE).expect("interface");
     let registered = conn
         .register_object(PATH, &info)
@@ -175,15 +178,17 @@ fn emit(event: Event) {
 }
 
 /// One notification for new mail: the sender and subject, or a count.
-fn notify(conn: &gio::DBusConnection, list: &[(String, String)]) {
+/// Clicking it opens Mail on the (newest) message.
+fn notify(conn: &gio::DBusConnection, list: &[(i64, String, String)]) {
     let (summary, body) = match list {
         [] => return,
-        [(from, subject)] => (from.clone(), subject.clone()),
+        [(_, from, subject)] => (from.clone(), subject.clone()),
         many => (
             format!("{} new messages", many.len()),
-            many.iter().take(3).map(|(f, s)| format!("{f}: {s}")).collect::<Vec<_>>().join("\n"),
+            many.iter().take(3).map(|(_, f, s)| format!("{f}: {s}")).collect::<Vec<_>>().join("\n"),
         ),
     };
+    let message = list.iter().map(|(id, _, _)| *id).max().unwrap_or(0);
     let mut hints = std::collections::HashMap::<String, glib::Variant>::new();
     hints.insert("desktop-entry".into(), "io.github.design_nexus.nixe.Mail".to_variant());
     hints.insert("category".into(), "email.arrived".to_variant());
@@ -200,6 +205,54 @@ fn notify(conn: &gio::DBusConnection, list: &[(String, String)]) {
         gio::DBusCallFlags::NONE,
         5000,
         gio::Cancellable::NONE,
-        |_| {},
+        move |r| {
+            if let Some(id) = r.ok().and_then(|v| v.get::<(u32,)>()).map(|(id,)| id) {
+                SHOWN.with(|s| s.borrow_mut().insert(id, message));
+            }
+        },
     );
+}
+
+/// Opens Mail when one of its notifications is clicked.
+fn watch_notifications(conn: &gio::DBusConnection) {
+    #[allow(deprecated)]
+    conn.signal_subscribe(
+        Some("org.freedesktop.Notifications"),
+        Some("org.freedesktop.Notifications"),
+        None,
+        Some("/org/freedesktop/Notifications"),
+        None,
+        gio::DBusSignalFlags::NONE,
+        |_, _, _, _, signal, params| match signal {
+            "ActionInvoked" => {
+                let Some((id, action)) = params.get::<(u32, String)>() else { return };
+                let Some(message) = SHOWN.with(|s| s.borrow_mut().remove(&id)) else { return };
+                if action == "default" {
+                    open_mail(message);
+                }
+            }
+            "NotificationClosed" => {
+                if let Some((id, _)) = params.get::<(u32, u32)>() {
+                    SHOWN.with(|s| s.borrow_mut().remove(&id));
+                }
+            }
+            _ => {}
+        },
+    );
+}
+
+/// `nixe-mail --message ID`: the one installed beside this program, else on PATH
+/// (tests name another with `NIXE_MAIL_PROGRAM`).
+fn open_mail(message: i64) {
+    if let Some(program) = std::env::var_os("NIXE_MAIL_PROGRAM") {
+        let _ = std::process::Command::new(program).args(["--message", &message.to_string()]).spawn();
+        return;
+    }
+    let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("nixe-mail"))).filter(|p| p.exists());
+    let program = beside.unwrap_or_else(|| "nixe-mail".into());
+    let _ = std::process::Command::new(program)
+        .args(["--message", &message.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }

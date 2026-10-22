@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["apps/mail", "apps/maild", "crates/nixe-mail-core"]
+members = ["apps/mail", "apps/mail-glimpse", "apps/maild", "crates/nixe-mail-core"]
 
 [workspace.package]
 edition = "2024"

@@ -617,6 +617,32 @@ impl Db {
     }
 
     /// Full-text search over every account; newest first.
+    /// People to suggest as recipients: whose name or address contains `query`,
+    /// the ones the user wrote to (weighed more) and heard from, most often
+    /// first. Mailing lists and no-reply senders are left out.
+    pub fn people(&self, query: &str, limit: usize) -> rusqlite::Result<Vec<crate::mime::Person>> {
+        let q = query.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let pattern = format!("%{}%", q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let mut stmt = self.conn.prepare(
+            "WITH people AS (
+               SELECT from_name AS name, from_addr AS email, 1 AS weight, date FROM messages WHERE list_id IS NULL
+               UNION ALL
+               SELECT json_extract(j.value, '$[0]'), json_extract(j.value, '$[1]'), 3, m.date
+                 FROM messages m JOIN mailboxes b ON b.id = m.mailbox AND b.role = 'sent', json_each(m.recipients) j
+             )
+             SELECT max(name), max(email) FROM people
+             WHERE email <> '' AND (email LIKE ?1 ESCAPE '\\' OR name LIKE ?1 ESCAPE '\\')
+               AND email NOT LIKE '%noreply%' AND email NOT LIKE '%no-reply%' AND email NOT LIKE '%donotreply%'
+               AND email NOT LIKE '%notifications@%' AND email NOT LIKE 'mailer-daemon@%'
+             GROUP BY lower(email) ORDER BY sum(weight) DESC, max(date) DESC LIMIT ?2",
+        )?;
+        stmt.query_map(params![pattern, limit as i64], |r| Ok(crate::mime::Person { name: r.get(0)?, email: r.get(1)? }))?
+            .collect()
+    }
+
     pub fn search(&self, query: &str, limit: usize) -> rusqlite::Result<Vec<ListItem>> {
         let fts = fts_query(query);
         if fts.is_empty() {
