@@ -960,7 +960,18 @@ fn rebuild_nav() {
             .collect();
         list_box.append(&group_label(&account.address, false, i == 0));
         for m in mine {
-            let depth = m.delimiter.as_deref().filter(|d| !d.is_empty()).map(|d| m.name.matches(d).count()).unwrap_or(0);
+            // Indented under parents that are shown (not Gmail's "[Gmail]").
+            let depth = m
+                .delimiter
+                .as_deref()
+                .filter(|d| !d.is_empty())
+                .map(|d| {
+                    let parts: Vec<&str> = m.name.split(d).collect();
+                    (1..parts.len())
+                        .filter(|i| mailboxes.iter().any(|p| p.account == m.account && p.name == parts[..*i].join(d)))
+                        .count()
+                })
+                .unwrap_or(0);
             let v = View::Mailbox(m.id);
             let button = nav_button(role_icon(m.role), &m.label(), &m.name, m.unread, active(&v));
             if let Some(content) = button.child() {

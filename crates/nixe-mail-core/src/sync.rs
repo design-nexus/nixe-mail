@@ -78,6 +78,8 @@ fn special_use(attrs: &[NameAttribute<'_>]) -> (bool, Vec<&'static str>) {
             NameAttribute::Sent => out.push("\\Sent"),
             NameAttribute::Trash => out.push("\\Trash"),
             NameAttribute::Extension(e) if e.eq_ignore_ascii_case("\\NonExistent") => selectable = false,
+            // Gmail's Important label repeats the inbox; it isn't kept.
+            NameAttribute::Extension(e) if e.eq_ignore_ascii_case("\\Important") => selectable = false,
             _ => {}
         }
     }
@@ -157,10 +159,11 @@ impl<'a> Sync<'a> {
         let mut seen = Vec::new();
         for n in &names {
             let (selectable, uses) = special_use(n.attributes());
-            seen.push(n.name().to_string());
+            // Ones that can't be opened (or aren't kept) go from here too.
             if !selectable {
                 continue;
             }
+            seen.push(n.name().to_string());
             let role = Role::detect(n.name(), uses.iter().copied());
             let id = self.db.upsert_mailbox(self.account, n.name(), n.delimiter(), role).map_err(db_err)?;
             out.push((id, n.name().to_string(), role));
