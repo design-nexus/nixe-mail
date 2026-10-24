@@ -15,27 +15,30 @@ This replaces `~/Projects/MAIL_PLAN.md`.
 
 ## Phases
 
-### 1. Vertical slice
-- [ ] `nixe-mail-core`: schema, store, FTS5
-- [ ] `nixe-maild`: IMAP sync of folders and messages against local Dovecot; GOA credentials
-- [ ] UI: sidebar, message list, reader (WebKitGTK 6, locked down)
-- [ ] Offline reading; auth failure → banner that opens Settings
+### 1. Vertical slice (done)
+- [x] `nixe-mail-core`: schema, store, FTS5
+- [x] `nixe-maild`: IMAP sync of folders and messages against local Dovecot; GOA credentials
+- [x] UI: sidebar, message list, reader (WebKitGTK 6, locked down)
+- [x] Offline reading; auth failure → banner that opens Settings
 
-### 2. MVP
-- [ ] Unified inbox, multiple accounts, identities and aliases
-- [ ] IDLE, CONDSTORE/QRESYNC where offered; Gmail labels and thread ids
-- [ ] Compose, reply, reply all, forward; drafts autosave; signatures; attachments
-- [ ] Archive, delete, spam, trash; flags; Undo toasts
-- [ ] Offline ops queue with backoff and conflict detection
-- [ ] Threading; search; notifications; per-account settings; keyboard shortcuts
-- [ ] Remote images off by default, per sender or per message
-- [ ] Control tools for Assistant
+### 2. MVP (done)
+- [x] Unified inbox, multiple accounts; replies come from the account the message arrived at
+- [ ] Aliases (each account sends from its own address only)
+- [x] IDLE, CONDSTORE where offered; Gmail labels
+- [ ] QRESYNC; Gmail thread ids (threads come from message headers)
+- [x] Compose, reply, reply all, forward; drafts autosave; signatures; attachments
+- [x] Archive, delete, spam, trash; flags; Undo toasts
+- [x] Offline ops queue with backoff and conflict detection
+- [x] Threading; search; notifications; per-account settings; keyboard shortcuts
+- [x] Remote images off by default, per sender or per message
+- [x] Control tools for Assistant (`mail.search/inbox/read/open/draft`; nothing sends)
 
 ### 3. Advanced
-- [ ] Screener for first-time senders; Imbox, Feed, Paper Trail; switch between this and folders without moving mail
-- [ ] Snooze, send later, follow-ups (local scheduling labeled as such; server scheduling when offered)
-- [ ] Sender dashboard and bulk rules
-- [ ] Assistant: summarize, draft, categorize, important (local processing)
+- [x] Screener for first-time senders; Imbox, Feed, Paper Trail; switch between this and folders without moving mail
+- [x] Snooze, send later, follow-ups (local scheduling labeled as such)
+- [ ] Server-side send later when offered (SMTP FUTURERELEASE)
+- [x] Sender dashboard and bulk rules
+- [ ] Assistant: summarize, categorize, important (draft is done)
 - [ ] "Remind me" through Nixe Reminders
 - [ ] Microsoft 365 through Microsoft Graph
 - [ ] OpenPGP / S/MIME

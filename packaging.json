@@ -1,0 +1,24 @@
+{
+  "application": "mail",
+  "directory": "mail",
+  "packages": [
+    "nixe-mail",
+    "nixe-maild"
+  ],
+  "manifest": "Cargo.toml",
+  "prepare": [],
+  "binaries": [],
+  "test_commands": [
+    [
+      "cargo",
+      "test",
+      "--locked",
+      "-p",
+      "nixe-mail-core",
+      "-p",
+      "nixe-mail",
+      "-p",
+      "nixe-maild"
+    ]
+  ]
+}
