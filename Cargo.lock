@@ -1395,7 +1395,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "nixe-accounts"
 version = "0.1.0"
-source = "git+file:///home/ken/Projects/nixe-core?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f#3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f"
+source = "git+https://github.com/design-nexus/nixe-core.git?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f#3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f"
 dependencies = [
  "anyhow",
  "gio",
@@ -1407,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "nixe-core"
 version = "0.1.0"
-source = "git+file:///home/ken/Projects/nixe-core?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f#3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f"
+source = "git+https://github.com/design-nexus/nixe-core.git?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f#3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f"
 dependencies = [
  "anyhow",
  "gtk4",
@@ -1436,7 +1436,7 @@ dependencies = [
  "glib",
  "gtk4",
  "nixe-accounts",
- "nixe-core 0.1.0 (git+file:///home/ken/Projects/nixe-core?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f)",
+ "nixe-core 0.1.0 (git+https://github.com/design-nexus/nixe-core.git?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f)",
  "nixe-mail-core",
  "nixe-theme",
  "nixe-ui",
@@ -1487,7 +1487,7 @@ dependencies = [
  "gio",
  "glib",
  "nixe-accounts",
- "nixe-core 0.1.0 (git+file:///home/ken/Projects/nixe-core?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f)",
+ "nixe-core 0.1.0 (git+https://github.com/design-nexus/nixe-core.git?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f)",
  "nixe-mail-core",
  "serde",
  "serde_json",

@@ -15,8 +15,8 @@ path = "src/main.rs"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 glib = "0.22"
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
-nixe-accounts = { git = "file:///home/ken/Projects/nixe-core", rev = "3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f" }
-nixe-core = { git = "file:///home/ken/Projects/nixe-core", rev = "3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f" }
+nixe-accounts = { git = "https://github.com/design-nexus/nixe-core.git", rev = "3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f" }
+nixe-core = { git = "https://github.com/design-nexus/nixe-core.git", rev = "3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f" }
 nixe-mail-core = { path = "../../crates/nixe-mail-core" }
 nixe-theme = { git = "https://github.com/design-nexus/nixe-design.git", rev = "609c1d2a5af41a8ee3b76ba23611eb30d95a4743" }
 nixe-ui = { git = "https://github.com/design-nexus/nixe-design.git", rev = "609c1d2a5af41a8ee3b76ba23611eb30d95a4743" }
