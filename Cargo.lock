@@ -736,7 +736,7 @@ dependencies = [
 [[package]]
 name = "glimpse-plugin-sdk"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-glimpse.git?rev=7da103687afe03d14879635c46a0d5a69f83754d#7da103687afe03d14879635c46a0d5a69f83754d"
+source = "git+https://github.com/design-nexus/nixe-glimpse.git?rev=e60055b3b10793646b07bcb8b403ef1c67cdfd01#e60055b3b10793646b07bcb8b403ef1c67cdfd01"
 dependencies = [
  "anyhow",
  "serde",
@@ -1395,7 +1395,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 [[package]]
 name = "nixe-accounts"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-core.git?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f#3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f"
+source = "git+https://github.com/design-nexus/nixe-core.git?rev=87682e6c936b6a4f006639b1a1c099e96346c07c#87682e6c936b6a4f006639b1a1c099e96346c07c"
 dependencies = [
  "anyhow",
  "gio",
@@ -1407,19 +1407,7 @@ dependencies = [
 [[package]]
 name = "nixe-core"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-core.git?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f#3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f"
-dependencies = [
- "anyhow",
- "gtk4",
- "serde",
- "serde_json",
- "toml",
-]
-
-[[package]]
-name = "nixe-core"
-version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-core.git?rev=7cd0be5d09cd1d91510794f58bbc720605951c12#7cd0be5d09cd1d91510794f58bbc720605951c12"
+source = "git+https://github.com/design-nexus/nixe-core.git?rev=87682e6c936b6a4f006639b1a1c099e96346c07c#87682e6c936b6a4f006639b1a1c099e96346c07c"
 dependencies = [
  "anyhow",
  "gtk4",
@@ -1436,7 +1424,7 @@ dependencies = [
  "glib",
  "gtk4",
  "nixe-accounts",
- "nixe-core 0.1.0 (git+https://github.com/design-nexus/nixe-core.git?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f)",
+ "nixe-core",
  "nixe-mail-core",
  "nixe-theme",
  "nixe-ui",
@@ -1487,7 +1475,7 @@ dependencies = [
  "gio",
  "glib",
  "nixe-accounts",
- "nixe-core 0.1.0 (git+https://github.com/design-nexus/nixe-core.git?rev=3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f)",
+ "nixe-core",
  "nixe-mail-core",
  "serde",
  "serde_json",
@@ -1497,10 +1485,10 @@ dependencies = [
 [[package]]
 name = "nixe-theme"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-design.git?rev=609c1d2a5af41a8ee3b76ba23611eb30d95a4743#609c1d2a5af41a8ee3b76ba23611eb30d95a4743"
+source = "git+https://github.com/design-nexus/nixe-design.git?rev=b8204de80644e263e32783602f2e0ae393578c9e#b8204de80644e263e32783602f2e0ae393578c9e"
 dependencies = [
  "gtk4",
- "nixe-core 0.1.0 (git+https://github.com/design-nexus/nixe-core.git?rev=7cd0be5d09cd1d91510794f58bbc720605951c12)",
+ "nixe-core",
  "serde",
  "toml",
 ]
@@ -1508,10 +1496,10 @@ dependencies = [
 [[package]]
 name = "nixe-ui"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-design.git?rev=609c1d2a5af41a8ee3b76ba23611eb30d95a4743#609c1d2a5af41a8ee3b76ba23611eb30d95a4743"
+source = "git+https://github.com/design-nexus/nixe-design.git?rev=b8204de80644e263e32783602f2e0ae393578c9e#b8204de80644e263e32783602f2e0ae393578c9e"
 dependencies = [
  "gtk4",
- "nixe-core 0.1.0 (git+https://github.com/design-nexus/nixe-core.git?rev=7cd0be5d09cd1d91510794f58bbc720605951c12)",
+ "nixe-core",
  "nixe-theme",
 ]
 

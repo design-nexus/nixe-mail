@@ -13,6 +13,6 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-glimpse-plugin-sdk = { git = "https://github.com/design-nexus/nixe-glimpse.git", rev = "7da103687afe03d14879635c46a0d5a69f83754d" }
+glimpse-plugin-sdk = { git = "https://github.com/design-nexus/nixe-glimpse.git", rev = "e60055b3b10793646b07bcb8b403ef1c67cdfd01" }
 nixe-mail-core = { path = "../../crates/nixe-mail-core" }
 serde_json = "1"

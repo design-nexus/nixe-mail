@@ -15,8 +15,8 @@ path = "src/main.rs"
 futures = "0.3"
 gio = "0.22"
 glib = "0.22"
-nixe-accounts = { git = "https://github.com/design-nexus/nixe-core.git", rev = "3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f", features = ["credentials"] }
-nixe-core = { git = "https://github.com/design-nexus/nixe-core.git", rev = "3a91eb0f0ae6be1bd42750723e17e26bb6dbea0f", default-features = false }
+nixe-accounts = { git = "https://github.com/design-nexus/nixe-core.git", rev = "87682e6c936b6a4f006639b1a1c099e96346c07c", features = ["credentials"] }
+nixe-core = { git = "https://github.com/design-nexus/nixe-core.git", rev = "87682e6c936b6a4f006639b1a1c099e96346c07c", default-features = false }
 nixe-mail-core = { path = "../../crates/nixe-mail-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
