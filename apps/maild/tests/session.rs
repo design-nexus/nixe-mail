@@ -4,10 +4,11 @@
 //! the window: it calls MailEngine1 and reads mail.sqlite.
 
 use gio::prelude::*;
+use nixe_mail_core::fake_graph::FakeGraph;
 use nixe_mail_core::flags::FLAGGED;
 use nixe_mail_core::mime::Person;
 use nixe_mail_core::send::Draft;
-use nixe_mail_core::testing::{Dovecot, Sink, env};
+use nixe_mail_core::testing::{Dovecot, Sink, env, message};
 use nixe_mail_core::{Db, Role};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -60,13 +61,19 @@ fn status(conn: &gio::DBusConnection) -> serde_json::Value {
 
 /// The engine's database, read-only as the window reads it.
 fn db() -> Db {
-    let path = std::path::PathBuf::from(env("XDG_DATA_HOME")).join("nixe-mail/mail.sqlite");
-    Db::open_read_only(&path).unwrap()
+    db_in(&std::path::PathBuf::from(env("XDG_DATA_HOME")))
+}
+
+fn db_in(data: &std::path::Path) -> Db {
+    Db::open_read_only(&data.join("nixe-mail/mail.sqlite")).unwrap()
 }
 
 fn message_id(subject: &str) -> Option<i64> {
-    let db = db();
-    let inbox = db.mailbox_by_role(USER, Role::Inbox).ok()??;
+    message_in(&db(), USER, subject)
+}
+
+fn message_in(db: &Db, account: &str, subject: &str) -> Option<i64> {
+    let inbox = db.mailbox_by_role(account, Role::Inbox).ok()??;
     db.list(&[inbox.id], 50, 0).ok()?.into_iter().find(|m| m.subject == subject).map(|m| m.id)
 }
 
@@ -235,4 +242,67 @@ fn syncs_pushes_new_mail_sends_and_saves_changes() {
     let nobody = Draft { to: Vec::new(), ..draft.clone() };
     let error = call(&conn, "Send", Some((serde_json::to_string(&nobody).unwrap(),).to_variant())).unwrap_err();
     assert!(error.message().contains("Add someone"), "{error}");
+}
+
+/// A Microsoft 365 account, against the fake Graph server: it syncs, polls for
+/// new mail, saves changes there and sends through sendMail (Bcc kept).
+#[test]
+#[ignore = "needs tools/test-imap.sh"]
+fn microsoft_365_accounts_sync_change_and_send() {
+    const OUTLOOK: &str = "outlook";
+    let fake = FakeGraph::start();
+    fake.deliver("Inbox", &message("Welcome", "Hello there"), "2026-01-01T09:00:00Z");
+    let dir = std::path::PathBuf::from(env("NIXE_MAIL_TEST_DIR")).join("graph");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let accounts = dir.join("accounts.json");
+    let list = serde_json::json!([{
+        "id": OUTLOOK, "address": "me@outlook.test", "name": "Me", "graph": fake.base, "password": "secret",
+    }]);
+    std::fs::write(&accounts, list.to_string()).unwrap();
+    let data = dir.join("data");
+    let conn = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE).unwrap();
+    let _maild = Killed(
+        std::process::Command::new(env!("CARGO_BIN_EXE_nixe-maild"))
+            .env("NIXE_MAIL_TEST_ACCOUNTS", &accounts)
+            .env("XDG_DATA_HOME", &data)
+            .env("NIXE_MAIL_TICK_SECONDS", "1")
+            .env("NIXE_MAIL_POLL_SECONDS", "1")
+            .spawn()
+            .unwrap(),
+    );
+    let find = |subject: &str| message_in(&db_in(&data), OUTLOOK, subject);
+
+    assert!(pump(30, || status(&conn)["accounts"][0]["last_sync"].is_i64()), "first sync: {}", status(&conn));
+    assert!(find("Welcome").is_some());
+
+    // New mail turns up on the next poll.
+    fake.deliver("Inbox", &message("Tickets", "Row 7"), "2026-01-02T09:00:00Z");
+    assert!(pump(30, || find("Tickets").is_some()), "new mail didn't come");
+
+    // Flag one and archive the other: saved on the server.
+    let subject = |m: &nixe_mail_core::fake_graph::Message| nixe_mail_core::mime::parse(&m.raw).unwrap().subject;
+    call(&conn, "SetFlags", Some((vec![find("Welcome").unwrap()], FLAGGED, 0i64).to_variant())).unwrap();
+    assert!(pump(30, || fake.messages("Inbox").iter().any(|m| subject(m) == "Welcome" && m.flagged)), "not flagged there");
+    call(&conn, "Move", Some((vec![find("Tickets").unwrap()], "archive").to_variant())).unwrap();
+    assert!(pump(30, || fake.messages("Archive").len() == 1), "not archived there");
+
+    // Send, with someone on Bcc.
+    let draft = Draft {
+        account: OUTLOOK.into(),
+        from: Person { name: "Me".into(), email: "me@outlook.test".into() },
+        to: vec![Person { name: "Sam".into(), email: "sam@example.test".into() }],
+        bcc: vec![Person { name: String::new(), email: "quiet@example.test".into() }],
+        subject: "Friday".into(),
+        body: "Ramen at noon?".into(),
+        ..Draft::default()
+    };
+    let reply = call(&conn, "Send", Some((serde_json::to_string(&draft).unwrap(),).to_variant())).unwrap();
+    assert_eq!(reply.child_value(0).get::<String>().as_deref(), Some("sent"));
+    let sent = fake.sent();
+    assert_eq!(sent.len(), 1, "sent exactly once");
+    assert!(String::from_utf8_lossy(&sent[0]).starts_with("Bcc: quiet@example.test\r\n"));
+    assert!(pump(10, || status(&conn)["pending"] == 0), "{}", status(&conn));
+    assert_eq!(fake.messages("Sent Items").len(), 1, "Outlook keeps the copy; Mail adds none");
+    assert_eq!(fake.sent().len(), 1, "still exactly once");
 }

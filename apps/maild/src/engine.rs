@@ -3,8 +3,9 @@
 //! inbox's IMAP IDLE says something arrived), sends queued mail, and tells the
 //! D-Bus side what changed.
 
-use crate::accounts::{self, MailAccount, Skipped};
+use crate::accounts::{self, Backend, MailAccount, Skipped};
 use nixe_mail_core::db::Role;
+use nixe_mail_core::graph::{self, GraphSync};
 use nixe_mail_core::net::{self, NetError};
 use nixe_mail_core::organize::Kind;
 use nixe_mail_core::send::{self, Draft};
@@ -436,8 +437,11 @@ async fn sync_account(state: &Shared, account: &MailAccount, events: &Rc<dyn Fn(
 }
 
 async fn connect(state: &Shared, account: &MailAccount) -> Result<net::Session, NetError> {
+    let Backend::Imap { imap, .. } = &account.backend else {
+        return Err(NetError::Refused("Microsoft 365 accounts don't use IMAP".into()));
+    };
     let auth = account.imap_auth(state.borrow().goa.as_ref()).map_err(NetError::SignIn)?;
-    net::imap(&account.imap, auth).await
+    net::imap(imap, auth).await
 }
 
 /// A connection of its own for a sync (SQLite in WAL mode serializes writers),
@@ -449,6 +453,11 @@ fn own_db() -> Result<(Db, Store), NetError> {
 }
 
 async fn sync_once(state: &Shared, account: &MailAccount) -> Result<sync::Report, NetError> {
+    if account.is_graph() {
+        let graph = account.graph(state.borrow().goa.as_ref())?;
+        let (mut db, store) = own_db()?;
+        return GraphSync::new(&graph, &mut db, &store, &account.id, Limits::default()).run().await;
+    }
     let mut session = connect(state, account).await?;
     let (mut db, store) = own_db()?;
     let report = Sync::new(&mut session, &mut db, &store, &account.id, Limits::default()).await?.run().await;
@@ -456,8 +465,28 @@ async fn sync_once(state: &Shared, account: &MailAccount) -> Result<sync::Report
     report
 }
 
+/// Microsoft 365: asks for a sync every few minutes (Graph has no IDLE that
+/// reaches a desktop).
+fn poll(state: Shared, account: MailAccount, me: mpsc::UnboundedSender<Command>) {
+    state.borrow_mut().idling.insert(account.id.clone());
+    tokio::task::spawn_local(async move {
+        let every = std::env::var("NIXE_MAIL_POLL_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(180);
+        loop {
+            tokio::time::sleep(Duration::from_secs(every)).await;
+            if !state.borrow().accounts.iter().any(|a| a.id == account.id) {
+                break;
+            }
+            let _ = me.send(Command::Sync(Some(account.id.clone())));
+        }
+        state.borrow_mut().idling.remove(&account.id);
+    });
+}
+
 /// Waits on the inbox with IMAP IDLE; asks for a sync when something changes.
 fn idle(state: Shared, account: MailAccount, me: mpsc::UnboundedSender<Command>) {
+    if account.is_graph() {
+        return poll(state, account, me);
+    }
     state.borrow_mut().idling.insert(account.id.clone());
     tokio::task::spawn_local(async move {
         let mut failures = 0u32;
@@ -512,6 +541,15 @@ async fn fetch_body(state: &Shared, id: i64) -> Result<(), String> {
     if row.raw.is_some() {
         return Ok(());
     }
+    if account.is_graph() {
+        let graph = account.graph(state.borrow().goa.as_ref()).map_err(|e| e.to_string())?;
+        let (mut db, store) = own_db().map_err(|e| e.to_string())?;
+        let found = GraphSync::new(&graph, &mut db, &store, &account.id, Limits::default())
+            .fetch_body(row.mailbox, row.uid)
+            .await
+            .map_err(|e| e.to_string())?;
+        return if found { Ok(()) } else { Err("The server doesn't have that message any more.".into()) };
+    }
     let mut session = connect(state, &account).await.map_err(|e| e.to_string())?;
     let mailbox = state.borrow().db.mailbox(row.mailbox).map_err(|e| e.to_string())?.ok_or("That mailbox is gone.")?;
     session.examine(&mailbox.name).await.map_err(|e| NetError::from(e).to_string())?;
@@ -532,7 +570,7 @@ async fn fetch_body(state: &Shared, id: i64) -> Result<(), String> {
 fn queue_send(state: &Shared, draft: &Draft, at: i64, follow_up: Option<i64>) -> Result<String, String> {
     let s = state.borrow();
     let account = s.accounts.iter().find(|a| a.id == draft.account).ok_or("That account isn't set up for mail.")?;
-    if account.smtp.is_none() {
+    if !account.can_send() {
         return Err("This account has no outgoing mail server.".into());
     }
     if draft.recipients().is_empty() {
@@ -563,7 +601,9 @@ async fn send_queued(state: &Shared, account_id: &str) -> Result<String, String>
         return Ok("sent".into());
     }
     let account = state.borrow().accounts.iter().find(|a| a.id == account_id).cloned().ok_or("That account isn't set up.")?;
-    let Some(smtp) = account.smtp.clone() else { return Err("This account has no outgoing mail server.".into()) };
+    if !account.can_send() {
+        return Err("This account has no outgoing mail server.".into());
+    }
     let mut outcome = Ok("sent".to_string());
     for op in ops {
         let raw_name = op.payload["raw"].as_str().unwrap_or_default().to_string();
@@ -573,17 +613,30 @@ async fn send_queued(state: &Shared, account_id: &str) -> Result<String, String>
             .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
             .unwrap_or_default();
         let raw = state.borrow().store.get(&raw_name).map_err(|e| e.to_string())?;
-        let auth = account.smtp_auth(state.borrow().goa.as_ref());
-        let result = match auth {
-            Ok(auth) => send::smtp(&smtp, auth, &from, &to, &raw).await,
-            Err(e) => Err(NetError::SignIn(e)),
+        // Credentials first: nothing borrowed may be held across the send.
+        let result = match &account.backend {
+            Backend::Imap { smtp: Some(smtp), .. } => {
+                let auth = account.smtp_auth(state.borrow().goa.as_ref());
+                match auth {
+                    Ok(auth) => send::smtp(smtp, auth, &from, &to, &raw).await,
+                    Err(e) => Err(NetError::SignIn(e)),
+                }
+            }
+            Backend::Imap { smtp: None, .. } => Err(NetError::Refused("This account has no outgoing mail server.".into())),
+            Backend::Graph { .. } => {
+                let graph = account.graph(state.borrow().goa.as_ref());
+                match graph {
+                    Ok(graph) => graph.send_mime(&raw, &graph::bcc_of(&raw, &to)).await,
+                    Err(e) => Err(e),
+                }
+            }
         };
         let s = state.borrow();
         match result {
             Ok(()) => {
                 let _ = s.db.op_done(op.id);
-                // Gmail files sent mail itself; others get a copy in Sent.
-                if !account.gmail
+                // Gmail and Outlook file sent mail themselves; others get a copy in Sent.
+                if matches!(account.backend, Backend::Imap { gmail: false, .. })
                     && let Ok(Some(sent)) = s.db.mailbox_by_role(&account.id, Role::Sent)
                 {
                     let _ = sync::queue_append(&s.db, &account.id, &sent.name, &raw_name, flags::SEEN);

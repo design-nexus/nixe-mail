@@ -1,6 +1,6 @@
 # Mail
 
-Mail for Omarchy: your Google, Fastmail, iCloud and other IMAP accounts in one inbox,
+Mail for Omarchy: your Google, Microsoft 365, Outlook.com, Fastmail, iCloud and other mail accounts in one inbox,
 readable offline and driven from the keyboard. Part of the
 [Nixe](https://github.com/design-nexus/nixe) apps.
 

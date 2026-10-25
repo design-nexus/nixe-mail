@@ -1,11 +1,13 @@
-//! Mail accounts: GNOME Online Accounts with Mail switched on and IMAP settings.
-//! Credentials come from GOA for each connection and are never kept.
+//! Mail accounts: GNOME Online Accounts with Mail switched on, with IMAP
+//! settings or (Microsoft 365, Outlook.com) Microsoft Graph. Credentials come
+//! from GOA for each connection and are never kept.
 //!
 //! Tests (and only tests) can add accounts from a JSON file named by
 //! `NIXE_MAIL_TEST_ACCOUNTS`: `[{"id", "address", "name", "imap": {host, port,
-//! security, user}, "smtp": {...}, "password"}]`.
+//! security, user}, "smtp": {...}, "password"}]`, or with `"graph": BASE_URL`
+//! in place of `imap` and `smtp` (the password is then the token).
 
-use nixe_mail_core::net::{Auth, Security, Server};
+use nixe_mail_core::net::{Auth, NetError, Security, Server};
 use serde::Deserialize;
 
 #[derive(Clone, Debug)]
@@ -13,10 +15,22 @@ pub struct MailAccount {
     pub id: String,
     pub address: String,
     pub name: String,
-    pub imap: Server,
-    pub smtp: Option<Server>,
-    pub gmail: bool,
+    pub backend: Backend,
     source: Source,
+}
+
+/// How an account's mail is reached.
+#[derive(Clone, Debug)]
+pub enum Backend {
+    Imap {
+        imap: Server,
+        smtp: Option<Server>,
+        gmail: bool,
+    },
+    /// Microsoft Graph at this base URL.
+    Graph {
+        base: String,
+    },
 }
 
 #[derive(Clone)]
@@ -60,14 +74,20 @@ pub fn discover(client: Option<&nixe_accounts::Client>) -> (Vec<MailAccount>, Ve
     let mut skipped = Vec::new();
     if let Some(client) = client {
         for account in client.with_service(&nixe_accounts::Service::Mail).unwrap_or_default() {
+            if account.provider_type == "ms_graph" {
+                accounts.push(MailAccount {
+                    id: account.id.clone(),
+                    address: account.identity.clone(),
+                    name: String::new(),
+                    backend: Backend::Graph { base: nixe_mail_core::graph::GRAPH.into() },
+                    source: Source::Goa { oauth: true, account: Box::new(account) },
+                });
+                continue;
+            }
             let settings = match client.mail_settings(&account) {
                 Ok(Some(s)) => s,
                 Ok(None) => {
-                    let reason = if account.provider_type == "ms_graph" {
-                        "Microsoft 365 mail isn't supported yet."
-                    } else {
-                        "This account has no mail server settings."
-                    };
+                    let reason = "This account has no mail server settings.";
                     skipped.push(Skipped { id: account.id.clone(), address: account.label().to_string(), reason: reason.into() });
                     continue;
                 }
@@ -88,9 +108,11 @@ pub fn discover(client: Option<&nixe_accounts::Client>) -> (Vec<MailAccount>, Ve
                 id: account.id.clone(),
                 address: settings.address.clone(),
                 name: settings.name.clone(),
-                smtp: settings.smtp.as_ref().and_then(server),
-                gmail: account.provider_type == "google" || imap.host.ends_with("gmail.com"),
-                imap,
+                backend: Backend::Imap {
+                    smtp: settings.smtp.as_ref().and_then(server),
+                    gmail: account.provider_type == "google" || imap.host.ends_with("gmail.com"),
+                    imap,
+                },
                 source: Source::Goa { oauth: settings.auth == nixe_accounts::mail::MailAuth::OAuth2, account: Box::new(account) },
             });
         }
@@ -113,8 +135,9 @@ struct TestAccount {
     address: String,
     #[serde(default)]
     name: String,
-    imap: TestServer,
+    imap: Option<TestServer>,
     smtp: Option<TestServer>,
+    graph: Option<String>,
     password: String,
 }
 
@@ -129,19 +152,45 @@ fn test_accounts() -> Vec<MailAccount> {
         user: s.user,
     };
     list.into_iter()
-        .map(|t| MailAccount {
-            id: t.id,
-            address: t.address,
-            name: t.name,
-            imap: conv(t.imap),
-            smtp: t.smtp.map(conv),
-            gmail: false,
-            source: Source::Test { password: t.password },
+        .filter_map(|t| {
+            let backend = match (t.graph, t.imap) {
+                (Some(base), _) => Backend::Graph { base },
+                (None, Some(imap)) => Backend::Imap { imap: conv(imap), smtp: t.smtp.map(conv), gmail: false },
+                (None, None) => return None,
+            };
+            Some(MailAccount {
+                id: t.id,
+                address: t.address,
+                name: t.name,
+                backend,
+                source: Source::Test { password: t.password },
+            })
         })
         .collect()
 }
 
 impl MailAccount {
+    pub fn is_graph(&self) -> bool {
+        matches!(self.backend, Backend::Graph { .. })
+    }
+
+    /// Whether mail can go out from it.
+    pub fn can_send(&self) -> bool {
+        match &self.backend {
+            Backend::Imap { smtp, .. } => smtp.is_some(),
+            Backend::Graph { .. } => true,
+        }
+    }
+
+    /// A Graph connection with a fresh token (Graph accounts only).
+    pub fn graph(&self, client: Option<&nixe_accounts::Client>) -> Result<nixe_mail_core::graph::Graph, NetError> {
+        let Backend::Graph { base } = &self.backend else { return Err(NetError::Refused("not a Microsoft 365 account".into())) };
+        let token = match self.auth(client, "").map_err(NetError::SignIn)? {
+            Auth::OAuth2(token) | Auth::Password(token) => token,
+        };
+        nixe_mail_core::graph::Graph::new(base, token)
+    }
+
     /// Credentials for IMAP, fresh from GOA.
     pub fn imap_auth(&self, client: Option<&nixe_accounts::Client>) -> Result<Auth, String> {
         self.auth(client, "imap-password")

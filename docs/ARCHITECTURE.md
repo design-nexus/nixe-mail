@@ -9,6 +9,7 @@ flowchart LR
   Maild --> Acc[nixe-accounts credentials]
   Acc -->|in-process| GOA[goa-daemon]
   Maild -->|IMAP / SMTP over TLS| Servers[(Servers)]
+  Maild -->|Microsoft Graph, HTTPS| M365[(Microsoft 365)]
   UI --> Web[WebKitGTK 6 message view]
   Glimpse[mail-glimpse] -.read only.-> Db
   UI -->|Control| Assistant
@@ -29,6 +30,7 @@ flowchart LR
 | --- | --- |
 | IMAP | `async-imap` (rustls) |
 | SMTP | `lettre` (rustls) |
+| Microsoft Graph | `reqwest` (rustls) |
 | MIME | `mail-parser`, `mail-builder` |
 | HTML sanitizing | `ammonia` |
 | Storage | `rusqlite` (bundled, FTS5) |
@@ -37,7 +39,8 @@ flowchart LR
 
 TLS is required. Server settings come from the GOA `Mail` interface; XOAUTH2 when GOA
 says so, otherwise the account password from GOA. Credentials are fetched for each
-connection and dropped.
+connection and dropped. Microsoft 365 and Outlook.com accounts (GOA `ms_graph`) have no
+IMAP settings and use Microsoft Graph with GOA's access token instead.
 
 ## Sync
 
@@ -50,6 +53,23 @@ connection and dropped.
   op was queued is a conflict: the server wins for flags, and moves of vanished messages
   are dropped and reported.
 - Account removed in GOA: sync stops; the UI offers to delete the local copy (Undo toast).
+
+## Microsoft 365 (`graph`)
+
+- Same rows as IMAP: each Graph folder is a mailbox (children named `Parent/Child`;
+  Outbox, Sync Issues and Conversation History left out), roles from the well-known
+  folders. Each message gets a UID here (`graph_items`, UIDVALIDITY 1); a folder whose
+  Graph id changes starts over.
+- Per folder, the delta query (`graph_folders.delta`) brings new and changed messages and
+  removals. The first starts from the newest 500 (a `receivedDateTime` filter); an
+  expired delta link (410) starts the folder over. Headers come from
+  `internetMessageHeaders`, so sorting works as for IMAP; Outlook's conversation id
+  threads. Bodies are MIME (`$value`).
+- Ops: flags → PATCH `isRead`/`flag`, move → `/move`, delete for good →
+  `/permanentDelete`. Sending posts the built MIME to `sendMail` with the Bcc header put
+  back (Graph takes recipients from the headers); Outlook files it in Sent Items.
+- No IDLE reaches a desktop: the engine polls every 3 minutes.
+- Only links under the Graph base are followed, so the token goes nowhere else.
 
 ## Categories
 

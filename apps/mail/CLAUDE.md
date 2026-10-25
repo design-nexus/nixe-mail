@@ -38,6 +38,10 @@
   `border-spacing` is zeroed for it).
 - Never call `selection.set_selected` while `UI` is borrowed: its handler borrows it
   (`window::select`).
+- Microsoft 365 / Outlook.com (GOA `ms_graph`): `nixe_mail_core::graph` over Microsoft
+  Graph (delta per folder, Graph ids mapped to UIDs in `graph_items`); maild's
+  `accounts::Backend::Graph`, polled every 3 min (`NIXE_MAIL_POLL_SECONDS` in tests). Never
+  hold a `state.borrow()` across an `.await` (a `match` on it does).
 - Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
   `tools/test-imap.sh` (Dovecot + SMTP sink + the engine on a private bus).
   Layout: `tools/test-imap.sh --run SCRIPT` gives a scratch server; snapshots with

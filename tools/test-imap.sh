@@ -117,11 +117,13 @@ if [[ ${#run[@]} -gt 0 ]]; then
   exit "$status"
 fi
 cargo test --locked -p nixe-mail-core --features testing --test imap -- --ignored --test-threads=1 "$@" || status=$?
+# Microsoft 365, against the fake Graph server (needs no Dovecot).
+[[ $status == 0 ]] && { cargo test --locked -p nixe-mail-core --features testing --test graph "$@" || status=$?; }
 # The engine, on a private session bus with scratch XDG directories.
 if [[ $status == 0 ]]; then
   XDG_DATA_HOME=$dir/xdg/data XDG_CONFIG_HOME=$dir/xdg/config XDG_CACHE_HOME=$dir/xdg/cache \
     XDG_RUNTIME_DIR=$dir/xdg/run GSETTINGS_BACKEND=memory GIO_USE_VFS=local \
-    dbus-run-session -- cargo test --locked -p nixe-maild --test session -- --ignored "$@" || status=$?
+    dbus-run-session -- cargo test --locked -p nixe-maild --test session -- --ignored --test-threads=1 "$@" || status=$?
 fi
 [[ $status == 0 ]] || tail -20 "$dir/dovecot.log" >&2
 exit "$status"

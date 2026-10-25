@@ -51,6 +51,8 @@ pub enum NetError {
     SignIn(String),
     /// Anything else the server said.
     Protocol(String),
+    /// The server won't do this (the message is gone, say); trying again won't help.
+    Refused(String),
 }
 
 impl std::fmt::Display for NetError {
@@ -59,7 +61,7 @@ impl std::fmt::Display for NetError {
             Self::Unreachable(m) => write!(f, "Couldn't reach the server: {m}"),
             Self::Certificate(m) => write!(f, "The server's certificate isn't trusted: {m}"),
             Self::SignIn(m) => write!(f, "The server refused to sign in: {m}"),
-            Self::Protocol(m) => write!(f, "{m}"),
+            Self::Protocol(m) | Self::Refused(m) => write!(f, "{m}"),
         }
     }
 }

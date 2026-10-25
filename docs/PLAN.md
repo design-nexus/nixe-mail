@@ -40,7 +40,7 @@ This replaces `~/Projects/MAIL_PLAN.md`.
 - [x] Sender dashboard and bulk rules
 - [ ] Assistant: summarize, categorize, important (draft is done)
 - [ ] "Remind me" through Nixe Reminders
-- [ ] Microsoft 365 through Microsoft Graph
+- [x] Microsoft 365 and Outlook.com through Microsoft Graph
 - [ ] OpenPGP / S/MIME
 
 ## Out of scope

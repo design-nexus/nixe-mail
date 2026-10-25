@@ -5,6 +5,9 @@
 //! store. `nixe-maild` is the only writer; the window reads.
 
 pub mod db;
+#[cfg(feature = "testing")]
+pub mod fake_graph;
+pub mod graph;
 pub mod mime;
 pub mod net;
 pub mod organize;

@@ -8,7 +8,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-const VERSION: i64 = 2;
+const VERSION: i64 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE accounts (
@@ -112,6 +112,23 @@ CREATE TABLE followups (
 );
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE INDEX messages_sender ON messages (lower(from_addr), date);
+";
+
+/// Version 3: Microsoft 365 accounts, synced over Microsoft Graph (see `graph`).
+/// A folder's Graph id and delta link, and each message's Graph id by its UID.
+const MIGRATE_3: &str = "
+CREATE TABLE graph_folders (
+  mailbox INTEGER PRIMARY KEY REFERENCES mailboxes(id) ON DELETE CASCADE,
+  folder TEXT NOT NULL,           -- the Graph folder id
+  delta TEXT                      -- where the next delta sync starts
+);
+CREATE TABLE graph_items (
+  mailbox INTEGER NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+  uid INTEGER NOT NULL,           -- given here, in arrival order
+  item TEXT NOT NULL,             -- the Graph message id
+  PRIMARY KEY (mailbox, uid),
+  UNIQUE (mailbox, item)
+);
 ";
 
 /// What a mailbox is for, from SPECIAL-USE or its name.
@@ -297,6 +314,9 @@ impl Db {
                 tx.execute("UPDATE messages SET kind = ?2 WHERE id = ?1", params![id, kind.id()])?;
             }
             tx.commit()?;
+        }
+        if version < 3 {
+            conn.execute_batch(MIGRATE_3)?;
         }
         if version < VERSION {
             conn.pragma_update(None, "user_version", VERSION)?;
@@ -959,6 +979,7 @@ fn list_row(r: &rusqlite::Row) -> rusqlite::Result<ListItem> {
     })
 }
 
+mod graph;
 mod organize;
 pub use organize::{FollowUp, Scheduled, SenderRow};
 
