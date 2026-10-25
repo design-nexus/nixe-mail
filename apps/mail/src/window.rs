@@ -40,6 +40,7 @@ pub const SHORTCUTS: &[(&[&str], &str)] = &[
     (&["!"], "Move to Junk"),
     (&["S"], "Star or unstar"),
     (&["U"], "Mark read or unread"),
+    (&["Shift", "U"], "Show only unread"),
     (&["Z"], "Snooze"),
     (&["1"], "Inbox"),
     (&["2"], "Drafts"),
@@ -56,7 +57,7 @@ pub const SHORTCUTS: &[(&[&str], &str)] = &[
 
 /// A line in the list.
 #[derive(Clone, Debug)]
-enum Row {
+pub(crate) enum Row {
     Conversation(ListItem),
     /// A draft being written, not sent yet.
     Draft {
@@ -100,6 +101,13 @@ struct Ui {
     list_title: gtk::Label,
     store: gio::ListStore,
     selection: gtk::SingleSelection,
+    list_view: gtk::ListView,
+    list_scroll: gtk::ScrolledWindow,
+    /// The view and search the list last showed (a different one starts at the top).
+    list_shows: String,
+    /// Only conversations with something unread (and the one open).
+    unread_only: bool,
+    unread_toggle: gtk::ToggleButton,
     list_stack: gtk::Stack,
     empty: gtk::Box,
     reader_bar: gtk::Box,
@@ -126,6 +134,13 @@ thread_local! {
     static TOAST: RefCell<Option<gtk::Box>> = const { RefCell::new(None) };
     static STATUS: RefCell<Option<gtk::Label>> = const { RefCell::new(None) };
     static RELOAD_QUEUED: Cell<bool> = const { Cell::new(false) };
+    /// Selecting without marking read (a right-click picks the row first).
+    static QUIET: Cell<bool> = const { Cell::new(false) };
+    /// The conversation opened on its own (Open the first conversation) and its
+    /// unread messages: read once the user goes on to another one.
+    static SEEN_ON_LEAVE: RefCell<Option<(String, Vec<i64>)>> = const { RefCell::new(None) };
+    /// The widget showing each list position, for menus opened from the keyboard.
+    static ROW_WIDGETS: RefCell<std::collections::HashMap<u32, glib::WeakRef<gtk::Widget>>> = RefCell::new(Default::default());
 }
 
 const PAGE: usize = 200;
@@ -195,8 +210,20 @@ fn snapshot_and_quit(app: &gtk::Application, out: std::path::PathBuf) {
     window.set_size_request(w, h);
     let app = app.clone();
     let delay = env_num("MAIL_SNAPSHOT_DELAY", 4000) as u64;
-    if let Some(n) = std::env::var("MAIL_SNAPSHOT_SELECT").ok().and_then(|v| v.parse::<u32>().ok()) {
-        glib::timeout_add_local_once(std::time::Duration::from_millis(delay / 3), move || {
+    if let Ok(query) = std::env::var("MAIL_SNAPSHOT_SEARCH") {
+        let search = ui.borrow().search.clone();
+        search.set_visible(true);
+        search.set_text(&query);
+    }
+    if std::env::var_os("MAIL_SNAPSHOT_UNREAD").is_some() {
+        set_unread_only(true);
+    }
+    // One row, or several one after another (`1,2,3`, `MAIL_SNAPSHOT_EVERY` ms apart).
+    let picks: Vec<u32> =
+        std::env::var("MAIL_SNAPSHOT_SELECT").unwrap_or_default().split(',').filter_map(|v| v.trim().parse().ok()).collect();
+    let every = env_num("MAIL_SNAPSHOT_EVERY", 1500) as u64;
+    for (i, n) in picks.into_iter().enumerate() {
+        glib::timeout_add_local_once(std::time::Duration::from_millis(delay / 3 + i as u64 * every), move || {
             select(n.saturating_sub(1));
         });
     }
@@ -322,8 +349,10 @@ pub fn open_message(id: i64) -> bool {
     true
 }
 
-fn show_view(view: View) {
+pub(crate) fn show_view(view: View) {
     let Some(ui) = ui() else { return };
+    // Another mailbox: what opened on its own wasn't necessarily looked at.
+    SEEN_ON_LEAVE.with(|s| s.borrow_mut().take());
     prefs::update(|p| p.last_section = view.id());
     {
         let mut u = ui.borrow_mut();
@@ -333,12 +362,47 @@ fn show_view(view: View) {
     }
     reader::show(None, &[]);
     reload();
+    open_first();
+}
+
+/// Shows the first conversation of the mailbox just opened (Settings → Reading),
+/// without marking it read: it wasn't chosen.
+fn open_first() {
+    let Some(ui) = ui() else { return };
+    let first = {
+        let u = ui.borrow();
+        u.open.is_none() && matches!(u.rows.first(), Some(Row::Conversation(_)))
+    };
+    if first && prefs::get().open_first {
+        select_quietly(0);
+        let thread = ui.borrow().open.clone();
+        let unread: Vec<i64> = reader::messages().iter().filter(|m| m.flags & flags::SEEN == 0).map(|m| m.id).collect();
+        SEEN_ON_LEAVE.with(|s| *s.borrow_mut() = thread.filter(|_| !unread.is_empty()).map(|t| (t, unread)));
+    }
+}
+
+/// Shows only conversations with something unread, or everything again.
+fn set_unread_only(on: bool) {
+    let Some(ui) = ui() else { return };
+    if ui.borrow().unread_only == on {
+        return;
+    }
+    ui.borrow_mut().unread_only = on;
+    let toggle = ui.borrow().unread_toggle.clone();
+    if toggle.is_active() != on {
+        toggle.set_active(on);
+    }
+    rebuild_list();
 }
 
 fn view_title(u: &Ui) -> String {
     if searching(u) {
         return format!("Results for “{}”", u.search.text().trim());
     }
+    view_name(u)
+}
+
+fn view_name(u: &Ui) -> String {
     match &u.view {
         View::All(role) => role_name(*role).to_string(),
         View::Kind(kind) => kind.name().to_string(),
@@ -410,7 +474,9 @@ fn rebuild_list() {
                             }
                         }
                     }
-                    let filter = view.filter(&u.mailboxes, data::screener_on());
+                    let mut filter = view.filter(&u.mailboxes, data::screener_on());
+                    filter.unread = u.unread_only;
+                    filter.keep = u.open.clone();
                     rows.extend(data::list_with(&mailboxes, &filter, u.limit).into_iter().map(Row::Conversation));
                 }
             }
@@ -425,13 +491,40 @@ fn rebuild_list() {
     rebuild_kinds();
     chrome::set_title(&ui.borrow().window, "Mail", &title);
 
-    let (store, selection, open) = {
+    let (store, selection, open, scroll) = {
         let u = ui.borrow();
-        (u.store.clone(), u.selection.clone(), u.open.clone())
+        (u.store.clone(), u.selection.clone(), u.open.clone(), u.list_scroll.clone())
     };
-    let objects: Vec<glib::Object> = rows.iter().map(|r| glib::BoxedAnyObject::new(r.clone()).upcast()).collect();
+    // Only the rows that changed are replaced (marking one read replaces one):
+    // replacing them all would scroll the list back to the top.
+    let shows = {
+        let u = ui.borrow();
+        format!("{}\u{1f}{}", u.view.id(), if searching(&u) { u.search.text().to_string() } else { String::new() })
+    };
+    let same_list = ui.borrow().list_shows == shows;
+    let old: Vec<String> = ui.borrow().rows.iter().map(|r| format!("{r:?}")).collect();
+    let new: Vec<String> = rows.iter().map(|r| format!("{r:?}")).collect();
+    let prefix = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+    let room = old.len().min(new.len()) - prefix;
+    let suffix = old.iter().rev().zip(new.iter().rev()).take(room).take_while(|(a, b)| a == b).count();
+    let objects: Vec<glib::Object> =
+        rows[prefix..rows.len() - suffix].iter().map(|r| glib::BoxedAnyObject::new(r.clone()).upcast()).collect();
+    let at = scroll.vadjustment().value();
     ui.borrow_mut().restoring = true;
-    store.splice(0, store.n_items(), &objects);
+    if store.n_items() as usize != old.len() {
+        // Out of step (shouldn't happen): start again.
+        let all: Vec<glib::Object> = rows.iter().map(|r| glib::BoxedAnyObject::new(r.clone()).upcast()).collect();
+        store.splice(0, store.n_items(), &all);
+    } else {
+        store.splice(prefix as u32, (old.len() - prefix - suffix) as u32, &objects);
+    }
+    ui.borrow_mut().list_shows = shows;
+    if same_list {
+        // Same list, same place.
+        scroll.vadjustment().set_value(at);
+        let s = scroll.clone();
+        glib::idle_add_local_once(move || s.vadjustment().set_value(at));
+    }
     let position = open.as_ref().and_then(|key| rows.iter().position(|r| r.key() == *key));
     selection.set_selected(position.map(|p| p as u32).unwrap_or(gtk::INVALID_LIST_POSITION));
     ui.borrow_mut().restoring = false;
@@ -588,7 +681,7 @@ fn list_row(row: &Row) -> gtk::Box {
     subject.set_xalign(0.0);
     subject.set_ellipsize(gtk::pango::EllipsizeMode::End);
     outer.append(&subject);
-    if !preview.trim().is_empty() {
+    if !preview.trim().is_empty() && prefs::get().show_previews {
         let p = widgets::label(preview.trim(), "mail-preview");
         p.set_xalign(0.0);
         p.set_wrap(true);
@@ -614,12 +707,35 @@ fn on_selected() {
     }
     match selected_row() {
         Some(Row::Conversation(c)) => {
+            // Leaving the conversation that opened on its own: it was seen.
+            if let Some((thread, ids)) = SEEN_ON_LEAVE.with(|s| s.borrow_mut().take()) {
+                if thread != c.thread && prefs::get().mark_read {
+                    engine::set_flags(&ids, flags::SEEN, 0);
+                } else if thread == c.thread {
+                    SEEN_ON_LEAVE.with(|s| *s.borrow_mut() = Some((thread, ids)));
+                }
+            }
             ui.borrow_mut().open = Some(c.thread.clone());
             let mailboxes = current_mailboxes(&ui.borrow());
             reader::show(Some(&c.thread), &mailboxes);
-            if prefs::get().mark_read {
-                let unread: Vec<i64> = reader::messages().iter().filter(|m| m.flags & flags::SEEN == 0).map(|m| m.id).collect();
-                engine::set_flags(&unread, flags::SEEN, 0);
+            let p = prefs::get();
+            if p.mark_read && !QUIET.with(|q| q.get()) {
+                let mark = || {
+                    let unread: Vec<i64> =
+                        reader::messages().iter().filter(|m| m.flags & flags::SEEN == 0).map(|m| m.id).collect();
+                    engine::set_flags(&unread, flags::SEEN, 0);
+                };
+                if p.mark_read_delay == 0 {
+                    mark();
+                } else {
+                    // Still open after the delay: read.
+                    let thread = c.thread.clone();
+                    glib::timeout_add_local_once(std::time::Duration::from_secs(p.mark_read_delay as u64), move || {
+                        if self::ui().is_some_and(|u| u.borrow().open.as_deref() == Some(thread.as_str())) {
+                            mark();
+                        }
+                    });
+                }
             }
         }
         Some(Row::Draft { id, .. }) => {
@@ -645,9 +761,45 @@ fn on_selected() {
 
 /// Selects a row (never while the UI state is borrowed: the selection's
 /// handler borrows it).
-fn select(position: u32) {
-    let Some(selection) = ui().map(|u| u.borrow().selection.clone()) else { return };
+pub(crate) fn select(position: u32) {
+    let Some((selection, view)) = ui().map(|u| (u.borrow().selection.clone(), u.borrow().list_view.clone())) else { return };
     selection.set_selected(position);
+    // Keep the selected row in view (arrowing down past the bottom, say).
+    if position != gtk::INVALID_LIST_POSITION && position < selection.n_items() {
+        view.scroll_to(position, gtk::ListScrollFlags::NONE, None);
+    }
+}
+
+/// Selects a row without marking it read (a right-click on it).
+pub(crate) fn select_quietly(position: u32) {
+    QUIET.with(|q| q.set(true));
+    select(position);
+    QUIET.with(|q| q.set(false));
+}
+
+pub(crate) fn row_at(position: u32) -> Option<Row> {
+    ui()?.borrow().rows.get(position as usize).cloned()
+}
+
+pub(crate) fn selected_position() -> Option<u32> {
+    let p = ui()?.borrow().selection.selected();
+    (p != gtk::INVALID_LIST_POSITION).then_some(p)
+}
+
+/// The widget showing a list position, if it's on screen.
+pub(crate) fn row_widget(position: u32) -> Option<gtk::Widget> {
+    ROW_WIDGETS.with(|w| w.borrow().get(&position).and_then(|w| w.upgrade()))
+}
+
+/// The role of the mailbox being looked at (Trash, Junk…), if it has one.
+pub(crate) fn current_role() -> Option<Role> {
+    let ui = ui()?;
+    let u = ui.borrow();
+    u.view.role(&u.mailboxes)
+}
+
+pub(crate) fn mailboxes() -> Vec<Mailbox> {
+    ui().map(|u| u.borrow().mailboxes.clone()).unwrap_or_default()
 }
 
 fn move_selection(step: i32) {
@@ -661,7 +813,7 @@ fn move_selection(step: i32) {
     }
     let current = selection.selected();
     let next = if current == gtk::INVALID_LIST_POSITION { 0 } else { (current as i32 + step).clamp(0, n - 1) };
-    selection.set_selected(next as u32);
+    select(next as u32);
 }
 
 fn load_more() {
@@ -704,9 +856,12 @@ fn act(target: Option<&str>, done_text: &str) {
     ui.borrow_mut().open = None;
     rebuild_list();
     let n = ui.borrow().rows.len() as u32;
-    if n > 0 && pos != gtk::INVALID_LIST_POSITION {
-        select(pos.min(n - 1));
+    let then = prefs::get().after_moving;
+    if n > 0 && pos != gtk::INVALID_LIST_POSITION && then != "list" {
+        let at = if then == "previous" { pos.saturating_sub(1) } else { pos };
+        select(at.min(n - 1));
     } else {
+        select(gtk::INVALID_LIST_POSITION);
         reader::show(None, &[]);
     }
     let undo_done = done.clone();
@@ -724,6 +879,12 @@ fn act(target: Option<&str>, done_text: &str) {
     });
     let target = target.map(str::to_string);
     glib::timeout_add_local_once(std::time::Duration::from_millis(6200), move || commit(&done, &ids, Some(target)));
+}
+
+/// Moves the open conversation to a target the engine knows (`archive`,
+/// `mailbox:<id>`…), with Undo.
+pub(crate) fn move_to(target: &str, done_text: &str) {
+    act(Some(target), done_text);
 }
 
 fn commit(done: &Rc<Cell<bool>>, ids: &[i64], target: Option<Option<String>>) {
@@ -749,11 +910,11 @@ fn flush_pending() {
     }
 }
 
-fn archive() {
+pub(crate) fn archive() {
     act(Some("archive"), "Archived.");
 }
 
-fn trash() {
+pub(crate) fn trash() {
     let role = ui().and_then(|u| {
         let u = u.borrow();
         u.view.role(&u.mailboxes)
@@ -765,7 +926,7 @@ fn trash() {
     }
 }
 
-fn junk() {
+pub(crate) fn junk() {
     let role = ui().and_then(|u| {
         let u = u.borrow();
         u.view.role(&u.mailboxes)
@@ -777,7 +938,7 @@ fn junk() {
     }
 }
 
-fn toggle_star() {
+pub(crate) fn toggle_star() {
     let messages = reader::messages();
     let Some(last) = messages.last() else { return };
     let starred = messages.iter().any(|m| m.flags & flags::FLAGGED != 0);
@@ -789,7 +950,7 @@ fn toggle_star() {
     }
 }
 
-fn toggle_unread() {
+pub(crate) fn toggle_unread() {
     let ids = targets();
     let messages = reader::messages();
     let any_unread = messages.iter().any(|m| m.flags & flags::SEEN == 0);
@@ -813,19 +974,19 @@ fn reply_target() -> Option<i64> {
     messages.iter().rev().find(|m| !me.iter().any(|a| a.eq_ignore_ascii_case(&m.from_addr))).or(messages.last()).map(|m| m.id)
 }
 
-fn reply(all: bool) {
+pub(crate) fn reply(all: bool) {
     if let Some(id) = reply_target() {
         compose::open(Start::Reply { message: id, all });
     }
 }
 
-fn forward() {
+pub(crate) fn forward() {
     if let Some(m) = reader::messages().last() {
         compose::open(Start::Forward(m.id));
     }
 }
 
-fn check_mail() {
+pub(crate) fn check_mail() {
     engine::sync("");
     toast("Checking for mail…");
 }
@@ -1012,7 +1173,66 @@ fn group_label(text: &str, first: bool, add: bool) -> gtk::Widget {
     row.upcast()
 }
 
-fn rebuild_nav() {
+/// An account's heading: click (or the chevron) folds its folders away;
+/// right-click for the account's menu.
+fn account_header(account: &nixe_mail_core::AccountRow, first_account: bool, folded: bool) -> gtk::Widget {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    row.add_css_class("compact-hide");
+    row.add_css_class("account-header");
+    let label = widgets::label(&account.address.to_uppercase(), "nav-group");
+    label.set_hexpand(true);
+    label.set_xalign(0.0);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    row.append(&label);
+    if first_account {
+        let plus = widgets::icon_button("list-add-symbolic", "Add an account");
+        plus.add_css_class("flat");
+        plus.add_css_class("nav-group-add");
+        plus.set_valign(gtk::Align::End);
+        plus.connect_clicked(|_| open_online_accounts());
+        row.append(&plus);
+    }
+    let (icon, tip) = if folded { ("pan-end-symbolic", "Show its folders") } else { ("pan-down-symbolic", "Hide its folders") };
+    let fold = widgets::icon_button(icon, tip);
+    fold.add_css_class("flat");
+    fold.add_css_class("nav-group-add");
+    fold.set_valign(gtk::Align::End);
+    let id = account.id.clone();
+    fold.connect_clicked(move |_| toggle_account_folded(&id));
+    row.append(&fold);
+    let click = gtk::GestureClick::new();
+    let id = account.id.clone();
+    click.connect_released(move |_, _, _, _| toggle_account_folded(&id));
+    label.add_controller(click);
+    crate::menus::attach_account(&row, account, folded);
+    row.upcast()
+}
+
+pub(crate) fn toggle_account_folded(id: &str) {
+    prefs::update(|p| {
+        if p.collapsed_accounts.iter().any(|a| a == id) {
+            p.collapsed_accounts.retain(|a| a != id);
+        } else {
+            p.collapsed_accounts.push(id.to_string());
+        }
+    });
+    rebuild_nav();
+}
+
+pub(crate) fn toggle_pinned(m: &Mailbox) {
+    let key = prefs::pin_key(&m.account, &m.name);
+    let pinned = prefs::get().pinned.contains(&key);
+    prefs::update(|p| {
+        p.pinned.retain(|k| *k != key);
+        if !pinned {
+            p.pinned.push(key.clone());
+        }
+    });
+    rebuild_nav();
+    toast(&if pinned { format!("Unpinned {}.", m.label()) } else { format!("Pinned {}.", m.label()) });
+}
+
+pub(crate) fn rebuild_nav() {
     let Some(ui) = ui() else { return };
     let list_box = ui.borrow().nav_list.clone();
     while let Some(child) = list_box.first_child() {
@@ -1045,6 +1265,7 @@ fn rebuild_nav() {
         let v = View::All(role);
         let button = nav_button(role_icon(Some(role)), name, &tooltip, count, active(&v));
         button.connect_clicked(move |_| show_view(v.clone()));
+        crate::menus::attach_role(&button, role);
         list_box.append(&button);
     }
 
@@ -1064,14 +1285,35 @@ fn rebuild_nav() {
         list_box.append(&button);
     }
 
+    // Pinned folders, in the order they were pinned.
+    let pins: Vec<&Mailbox> =
+        prefs::get().pinned.iter().filter_map(|k| mailboxes.iter().find(|m| prefs::pin_key(&m.account, &m.name) == *k)).collect();
+    if !pins.is_empty() {
+        list_box.append(&group_label("Pinned", false, false));
+        for m in pins {
+            let address = accounts.iter().find(|a| a.id == m.account).map(|a| a.address.as_str()).unwrap_or("");
+            let tooltip = if several { format!("{} · {address}", m.name) } else { m.name.clone() };
+            let v = View::Mailbox(m.id);
+            let button = nav_button(role_icon(m.role), &m.label(), &tooltip, m.unread, active(&v));
+            button.connect_clicked(move |_| show_view(v.clone()));
+            crate::menus::attach_mailbox(&button, m);
+            list_box.append(&button);
+        }
+    }
+
+    let collapsed = prefs::get().collapsed_accounts;
     for (i, account) in accounts.iter().enumerate() {
+        let folded = collapsed.contains(&account.id);
+        list_box.append(&account_header(account, i == 0, folded));
+        if folded {
+            continue;
+        }
         let mine: Vec<&Mailbox> = mailboxes
             .iter()
             .filter(|m| m.account == account.id)
             .filter(|m| !matches!(m.role, Some(Role::All) | Some(Role::Flagged)))
             .filter(|m| several && m.role == Some(Role::Inbox) || m.role.is_none())
             .collect();
-        list_box.append(&group_label(&account.address, false, i == 0));
         for m in mine {
             // Indented under parents that are shown (not Gmail's "[Gmail]").
             let depth = m
@@ -1091,6 +1333,7 @@ fn rebuild_nav() {
                 content.set_margin_start((depth.min(4) * 14) as i32);
             }
             button.connect_clicked(move |_| show_view(v.clone()));
+            crate::menus::attach_mailbox(&button, m);
             list_box.append(&button);
         }
     }
@@ -1196,7 +1439,17 @@ fn build(app: &gtk::Application) {
     list_title.set_hexpand(true);
     list_title.set_xalign(0.0);
     list_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    // A long title ("Results for …") shortens; it never widens the list.
+    list_title.set_max_width_chars(8);
     list_bar.append(&list_title);
+    let unread_toggle = gtk::ToggleButton::new();
+    unread_toggle.set_icon_name("mail-unread-symbolic");
+    unread_toggle.set_tooltip_text(Some("Show only unread (Shift+U)"));
+    unread_toggle.add_css_class("flat");
+    unread_toggle.add_css_class("icon-button");
+    unread_toggle.add_css_class("unread-toggle");
+    unread_toggle.connect_toggled(|t| set_unread_only(t.is_active()));
+    list_bar.append(&unread_toggle);
     let check = widgets::icon_button("view-refresh-symbolic", "Check for mail (Ctrl+R)");
     check.connect_clicked(|_| check_mail());
     list_bar.append(&check);
@@ -1214,7 +1467,18 @@ fn build(app: &gtk::Application) {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
         let Some(obj) = item.item().and_downcast::<glib::BoxedAnyObject>() else { return };
         let row = obj.borrow::<Row>().clone();
-        item.set_child(Some(&list_row(&row)));
+        let child = list_row(&row);
+        let position = item.position();
+        ROW_WIDGETS.with(|w| w.borrow_mut().insert(position, child.upcast_ref::<gtk::Widget>().downgrade()));
+        let weak = item.downgrade();
+        widgets::on_right_click(&child, move |w, x, y| {
+            if let Some(item) = weak.upgrade()
+                && item.position() != gtk::INVALID_LIST_POSITION
+            {
+                crate::menus::list(item.position(), w, x, y);
+            }
+        });
+        item.set_child(Some(&child));
     });
     let list_view = gtk::ListView::new(Some(selection.clone()), Some(factory));
     list_view.add_css_class("mail-list");
@@ -1324,6 +1588,11 @@ fn build(app: &gtk::Application) {
         list_title,
         store,
         selection,
+        list_view: list_view.clone(),
+        list_scroll: list_scroll.clone(),
+        list_shows: String::new(),
+        unread_only: false,
+        unread_toggle: unread_toggle.clone(),
         list_stack,
         empty,
         reader_bar,
@@ -1463,6 +1732,10 @@ fn install_keys(window: &gtk::ApplicationWindow, search: &gtk::SearchEntry) {
         if typing(win.upcast_ref()) {
             return glib::Propagation::Proceed;
         }
+        if widgets::is_menu_key(key, mods) {
+            crate::menus::for_selected();
+            return glib::Propagation::Stop;
+        }
         match key {
             gdk::Key::c | gdk::Key::n => compose::open(Start::New),
             gdk::Key::j | gdk::Key::Down => move_selection(1),
@@ -1475,6 +1748,10 @@ fn install_keys(window: &gtk::ApplicationWindow, search: &gtk::SearchEntry) {
             gdk::Key::exclam => junk(),
             gdk::Key::s => toggle_star(),
             gdk::Key::u => toggle_unread(),
+            gdk::Key::U => {
+                let on = ui().is_some_and(|u| u.borrow().unread_only);
+                set_unread_only(!on);
+            }
             gdk::Key::z => {
                 if let Some(ui) = ui()
                     && !reader::messages().is_empty()

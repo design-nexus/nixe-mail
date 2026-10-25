@@ -4,6 +4,7 @@ mod compose;
 mod control;
 mod data;
 mod engine;
+mod menus;
 mod organize;
 mod prefs;
 mod reader;

@@ -19,7 +19,8 @@ use std::rc::Rc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
-const SYNC_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How often the periodic sync looks at its setting (`check_every`).
+const SYNC_CHECK: Duration = Duration::from_secs(60);
 const IDLE_FOR: Duration = Duration::from_secs(25 * 60);
 
 pub type Reply<T> = oneshot::Sender<Result<T, String>>;
@@ -60,6 +61,8 @@ pub enum Command {
         screened: Option<Option<String>>,
     },
     SetScreener(bool),
+    /// One of the engine's settings (`nixe_mail_core::db` `ENGINE_SETTINGS`).
+    SetSetting(String, String),
     /// Hide a message's conversation until a time (0: bring it back now).
     Snooze(i64, i64),
     /// Remind about a conversation if nobody answers by a time (0: don't).
@@ -173,12 +176,22 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
         }
     });
 
-    // Periodic sync.
+    // Periodic sync, as often as Settings says (never: only when asked).
     let periodic = me.clone();
+    let every_state = state.clone();
     tokio::task::spawn_local(async move {
+        let _ = periodic.send(Command::Sync(None));
+        let mut waited = Duration::ZERO;
         loop {
-            let _ = periodic.send(Command::Sync(None));
-            tokio::time::sleep(SYNC_EVERY).await;
+            tokio::time::sleep(SYNC_CHECK).await;
+            waited += SYNC_CHECK;
+            let minutes = every_state.borrow().db.check_every();
+            if minutes > 0 && waited >= Duration::from_secs(minutes * 60) {
+                waited = Duration::ZERO;
+                if periodic.send(Command::Sync(None)).is_err() {
+                    break;
+                }
+            }
         }
     });
 
@@ -284,6 +297,17 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
                 with_db(&state, |db| db.set_screener(on, now()));
                 events(Event::Changed("messages"));
             }
+            Command::SetSetting(key, value) => {
+                let saved = with_db(&state, |db| db.set_engine_setting(&key, &value)).unwrap_or(false);
+                if saved && key == nixe_mail_core::db::DISABLED_ACCOUNTS {
+                    rediscover(&state);
+                    publish(&state);
+                    // Back on: catch up now.
+                    let _ = me.send(Command::Sync(None));
+                    events(Event::Changed("mailboxes"));
+                }
+                events(Event::Changed("status"));
+            }
             Command::Snooze(id, until) => {
                 with_db(&state, |db| {
                     let Some(m) = db.message(id)? else { return Ok(()) };
@@ -374,11 +398,14 @@ fn destination(db: &Db, account: &str, role: Role) -> rusqlite::Result<Option<St
 /// Re-reads the accounts from GOA (an account removed there stops syncing;
 /// the window offers to forget its mail).
 fn rediscover(state: &Shared) {
-    let (accounts, skipped) = accounts::discover(state.borrow().goa.as_ref());
+    let (mut accounts, skipped) = accounts::discover(state.borrow().goa.as_ref());
     let mut s = state.borrow_mut();
     for a in &accounts {
         let _ = s.db.upsert_account(&a.id, &a.address, &a.name);
     }
+    // Turned off in Mail: known, but not synced.
+    let off = s.db.disabled_accounts();
+    accounts.retain(|a| !off.contains(&a.id));
     s.accounts = accounts;
     s.skipped = skipped;
 }
@@ -409,7 +436,7 @@ async fn sync_account(state: &Shared, account: &MailAccount, events: &Rc<dyn Fn(
             let start_idle = !s.idling.contains(&account.id);
             drop(s);
             events(Event::Changed("messages"));
-            if !new_mail.is_empty() && !active {
+            if !new_mail.is_empty() && !active && s_notify(state) {
                 events(Event::NewMail(new_mail));
             }
             if start_idle {
@@ -452,17 +479,29 @@ fn own_db() -> Result<(Db, Store), NetError> {
     Ok((db, Store::new(paths.store())))
 }
 
+/// How much a sync keeps, with Settings' days of mail for reading offline.
+fn limits(db: &Db) -> Limits {
+    Limits { body_days: db.body_days(), ..Limits::default() }
+}
+
 async fn sync_once(state: &Shared, account: &MailAccount) -> Result<sync::Report, NetError> {
     if account.is_graph() {
         let graph = account.graph(state.borrow().goa.as_ref())?;
         let (mut db, store) = own_db()?;
-        return GraphSync::new(&graph, &mut db, &store, &account.id, Limits::default()).run().await;
+        let limits = limits(&db);
+        return GraphSync::new(&graph, &mut db, &store, &account.id, limits).run().await;
     }
     let mut session = connect(state, account).await?;
     let (mut db, store) = own_db()?;
-    let report = Sync::new(&mut session, &mut db, &store, &account.id, Limits::default()).await?.run().await;
+    let limits = limits(&db);
+    let report = Sync::new(&mut session, &mut db, &store, &account.id, limits).await?.run().await;
     let _ = session.logout().await;
     report
+}
+
+/// Whether new mail is announced (Settings → Notifications).
+fn s_notify(state: &Shared) -> bool {
+    state.borrow().db.notify_new_mail()
 }
 
 /// Microsoft 365: asks for a sync every few minutes (Graph has no IDLE that

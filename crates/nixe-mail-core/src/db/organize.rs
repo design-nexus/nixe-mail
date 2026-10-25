@@ -6,6 +6,12 @@ use crate::organize::{Kind, unsubscribe_link};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+/// Engine settings the window may change (`SetSetting`).
+pub const NOTIFY: &str = "notify";
+pub const CHECK_EVERY: &str = "check_every";
+pub const BODY_DAYS: &str = "body_days";
+pub const DISABLED_ACCOUNTS: &str = "disabled_accounts";
+
 /// A sender as the sender list shows them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SenderRow {
@@ -145,6 +151,44 @@ impl Db {
             self.conn.execute("DELETE FROM settings WHERE key = 'screener_since'", [])?;
             Ok(())
         }
+    }
+
+    // ---------- choices for the engine (the window's Settings) ----------
+
+    /// Show a notification for new mail (on unless turned off).
+    pub fn notify_new_mail(&self) -> bool {
+        self.setting(NOTIFY).ok().flatten().as_deref() != Some("off")
+    }
+
+    /// Minutes between checks for mail; 0 checks only when asked (Microsoft 365
+    /// accounts poll on their own, IMAP accounts still hear of new mail by IDLE).
+    pub fn check_every(&self) -> u64 {
+        self.setting(CHECK_EVERY).ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(5)
+    }
+
+    /// Days of whole messages kept for reading offline.
+    pub fn body_days(&self) -> i64 {
+        self.setting(BODY_DAYS).ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(30).clamp(1, 3650)
+    }
+
+    /// Accounts turned off in Mail: not synced, not shown, their mail kept.
+    pub fn disabled_accounts(&self) -> Vec<String> {
+        self.setting(DISABLED_ACCOUNTS).ok().flatten().and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
+    }
+
+    /// Sets one of `ENGINE_SETTINGS`; false (and nothing saved) for any other key
+    /// or a value that isn't valid for it.
+    pub fn set_engine_setting(&self, key: &str, value: &str) -> rusqlite::Result<bool> {
+        let valid = match key {
+            NOTIFY => matches!(value, "on" | "off"),
+            CHECK_EVERY | BODY_DAYS => value.parse::<u64>().is_ok(),
+            DISABLED_ACCOUNTS => serde_json::from_str::<Vec<String>>(value).is_ok(),
+            _ => false,
+        };
+        if valid {
+            self.set_setting(key, value)?;
+        }
+        Ok(valid)
     }
 
     fn setting(&self, key: &str) -> rusqlite::Result<Option<String>> {

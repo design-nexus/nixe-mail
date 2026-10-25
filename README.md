@@ -38,6 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe-mail/main/install
 | ! | Move to Junk |
 | S | Star or unstar |
 | U | Mark read or unread |
+| Shift+U | Show only unread |
 | Z | Snooze |
 | 1 / 2 / 3 / 4 | Inbox, Drafts, Sent, Archive |
 | Ctrl+R | Check for mail |

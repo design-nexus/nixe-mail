@@ -182,11 +182,15 @@ pub struct Filter {
     pub screen: Screen,
     /// Only snoozed conversations, instead of everything else.
     pub snoozed: bool,
+    /// Only conversations with something unread...
+    pub unread: bool,
+    /// ...and this one (the conversation open, read by now), whatever it is.
+    pub keep: Option<String>,
 }
 
 impl Default for Filter {
     fn default() -> Self {
-        Self { kind: None, screen: Screen::Any, snoozed: false }
+        Self { kind: None, screen: Screen::Any, snoozed: false, unread: false, keep: None }
     }
 }
 

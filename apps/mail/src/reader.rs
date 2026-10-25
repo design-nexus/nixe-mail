@@ -21,7 +21,7 @@ use gtk::prelude::*;
 use nixe_mail_core::db::MessageRow;
 use nixe_mail_core::flags;
 use nixe_mail_core::mime::{self, Attachment, Parsed};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use webkit6::prelude::*;
 
@@ -48,6 +48,15 @@ struct Reader {
 thread_local! {
     static READER: RefCell<Option<Reader>> = const { RefCell::new(None) };
     static WEB: RefCell<Option<(webkit6::WebContext, webkit6::NetworkSession)>> = const { RefCell::new(None) };
+    /// A hidden view started with the window: its web process is up before the
+    /// first message opens, and every message view shares it (`related_view`).
+    static WARM: RefCell<Option<webkit6::WebView>> = const { RefCell::new(None) };
+    /// Message views from the last conversation, loaded again for the next one
+    /// (making a view, and closing one, costs WebKit a round trip each).
+    static POOL: RefCell<Vec<webkit6::WebView>> = const { RefCell::new(Vec::new()) };
+    /// Which body each (reused) view shows, so a late timer from an earlier one
+    /// doesn't reveal the next early.
+    static LOADS: Cell<u64> = const { Cell::new(0) };
 }
 
 fn with<T>(f: impl FnOnce(&mut Reader) -> T) -> Option<T> {
@@ -55,6 +64,7 @@ fn with<T>(f: impl FnOnce(&mut Reader) -> T) -> Option<T> {
 }
 
 pub fn build() -> gtk::Box {
+    prewarm();
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
     root.add_css_class("reader");
     root.set_hexpand(true);
@@ -125,7 +135,9 @@ pub fn show(thread: Option<&str>, mailboxes: &[i64]) {
         r.thread = thread.map(str::to_string);
         r.mailboxes = mailboxes.to_vec();
         r.messages = messages.clone();
-        let drawn: Vec<(i64, i64, bool)> = messages.iter().map(|m| (m.id, m.flags, m.raw.is_some())).collect();
+        // Marking read changes nothing shown: redrawing for it would reload
+        // every body a moment after opening (the open message is marked at once).
+        let drawn: Vec<(i64, i64, bool)> = messages.iter().map(|m| (m.id, m.flags & !flags::SEEN, m.raw.is_some())).collect();
         let changed = !same || drawn != r.drawn;
         r.drawn = drawn;
         changed
@@ -148,7 +160,7 @@ pub fn show(thread: Option<&str>, mailboxes: &[i64]) {
 }
 
 /// Redraws after a choice that changes what shows (expanding, images).
-fn refresh() {
+pub fn refresh() {
     with(|r| r.drawn.clear());
     let (thread, mailboxes) = with(|r| (r.thread.clone(), r.mailboxes.clone())).unwrap_or_default();
     show(thread.as_deref(), &mailboxes);
@@ -160,10 +172,22 @@ fn redraw(scroll_to_end: bool) {
     else {
         return;
     };
+    // Keep the old views for the new conversation's bodies.
+    let old = with(|r| std::mem::take(&mut r.views)).unwrap_or_default();
+    for view in old {
+        if let Some(parent) = view.parent().and_downcast::<gtk::Box>() {
+            parent.remove(&view);
+        }
+        POOL.with(|p| {
+            let mut p = p.borrow_mut();
+            if p.len() < 4 {
+                p.push(view);
+            }
+        });
+    }
     while let Some(child) = body.first_child() {
         body.remove(&child);
     }
-    with(|r| r.views.clear());
     if messages.is_empty() {
         body.append(&widgets::empty_state("mail-read-symbolic", "No conversation selected", "", None));
         return;
@@ -179,6 +203,10 @@ fn redraw(scroll_to_end: bool) {
     let mut focus: Option<gtk::Widget> = None;
     for (i, m) in messages.iter().enumerate() {
         let open = i == last || m.flags & flags::SEEN == 0 || expanded.contains(&m.id);
+        if open {
+            // Stays open when it's read and the conversation is drawn again.
+            with(|r| r.expanded.insert(m.id));
+        }
         let card = if open { message_card(m) } else { collapsed_card(m) };
         if open && focus.is_none() && m.flags & flags::SEEN == 0 {
             focus = Some(card.clone().upcast());
@@ -321,8 +349,13 @@ fn body_for(card: &gtk::Box, m: &MessageRow, raw: &[u8], parsed: &Parsed) {
     let view = web_view();
     view.add_css_class("message-html");
     view.set_size_request(-1, 120);
+    // Hidden until it's measured, so it never shows cut off at the first height.
+    view.set_opacity(0.0);
     view.load_html(&document(&clean.html, m.id, allowed), Some(&format!("{SCHEME}://message/{}", m.id)));
-    fit_height(&view);
+    let load = LOADS.with(|l| l.get() + 1);
+    LOADS.with(|l| l.set(load));
+    view.set_widget_name(&format!("body-{load}"));
+    fit_height(&view, load);
     with(|r| r.views.push(view.clone()));
     card.append(&view);
 }
@@ -637,8 +670,39 @@ fn serve(request: &webkit6::URISchemeRequest) {
     }
 }
 
-fn web_view() -> webkit6::WebView {
+/// Starts the web process (a blank page in a view never shown).
+fn prewarm() {
+    if WARM.with(|w| w.borrow().is_some()) {
+        return;
+    }
     let (ctx, session) = context();
+    let view = webkit6::WebView::builder().web_context(&ctx).network_session(&session).settings(&locked_settings()).build();
+    view.load_html("<!doctype html><html></html>", None);
+    WARM.with(|w| *w.borrow_mut() = Some(view));
+}
+
+fn web_view() -> webkit6::WebView {
+    if let Some(view) = POOL.with(|p| p.borrow_mut().pop()) {
+        return view;
+    }
+    let settings = locked_settings();
+    let warm = WARM.with(|w| w.borrow().clone());
+    let view = match warm {
+        // Shares the warm view's process, context and session.
+        Some(warm) => webkit6::WebView::builder().related_view(&warm).settings(&settings).build(),
+        None => {
+            let (ctx, session) = context();
+            webkit6::WebView::builder().web_context(&ctx).network_session(&session).settings(&settings).build()
+        }
+    };
+    configure(&view);
+    watch_load(&view);
+    view
+}
+
+/// Page script off (our measuring runs in an isolated world), nothing stored,
+/// no media, no navigation gestures.
+fn locked_settings() -> webkit6::Settings {
     let settings = webkit6::Settings::new();
     // Page script stays off; the API's isolated world still runs (to measure).
     settings.set_enable_javascript(true);
@@ -659,7 +723,10 @@ fn web_view() -> webkit6::WebView {
     settings.set_allow_modal_dialogs(false);
     settings.set_allow_top_navigation_to_data_urls(false);
     settings.set_enable_fullscreen(false);
-    let view = webkit6::WebView::builder().web_context(&ctx).network_session(&session).settings(&settings).build();
+    settings
+}
+
+fn configure(view: &webkit6::WebView) {
     view.set_hexpand(true);
     view.set_background_color(&gdk::RGBA::WHITE);
     view.connect_decide_policy(|_, decision, kind| {
@@ -689,22 +756,44 @@ fn web_view() -> webkit6::WebView {
         }
         menu.first().is_none()
     });
-    view
 }
 
 /// Sizes the view to its content (the conversation scrolls, not the view).
-fn fit_height(view: &webkit6::WebView) {
-    view.connect_load_changed(|view, event| {
-        if event == webkit6::LoadEvent::Finished {
-            for delay in [0u64, 250, 1000, 3000] {
-                let v = view.clone();
-                glib::timeout_add_local_once(std::time::Duration::from_millis(delay), move || measure(&v));
-            }
+fn fit_height(view: &webkit6::WebView, load: u64) {
+    // Never left invisible if measuring fails (unless it shows another body by now).
+    let weak = view.downgrade();
+    glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+        if let Some(v) = weak.upgrade()
+            && v.widget_name() == format!("body-{load}")
+        {
+            v.set_opacity(1.0);
         }
     });
 }
 
-fn measure(view: &webkit6::WebView) {
+/// Measures as a body loads (connected once per view; views are reused).
+fn watch_load(view: &webkit6::WebView) {
+    view.connect_load_changed(|view, event| {
+        // The document is in by Committed (it's one string); images and fonts
+        // from the store finish later and can make it taller.
+        // Shown once loaded (Finished), already at its height.
+        let (delays, reveal): (&[u64], bool) = match event {
+            webkit6::LoadEvent::Committed => (&[0, 30], false),
+            webkit6::LoadEvent::Finished => (&[0, 250, 1000, 3000], true),
+            _ => (&[], false),
+        };
+        let body = view.widget_name();
+        for delay in delays {
+            let (v, body) = (view.clone(), body.clone());
+            // Still the same body (a reused view may show the next one by then).
+            glib::timeout_add_local_once(std::time::Duration::from_millis(*delay), move || {
+                measure(&v, reveal && v.widget_name() == body)
+            });
+        }
+    });
+}
+
+fn measure(view: &webkit6::WebView, reveal: bool) {
     let v = view.clone();
     view.evaluate_javascript(
         "Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)",
@@ -717,6 +806,9 @@ fn measure(view: &webkit6::WebView) {
                 if v.height_request() != h {
                     v.set_size_request(-1, h);
                 }
+                if reveal {
+                    v.set_opacity(1.0);
+                }
             }
         },
     );
@@ -725,6 +817,6 @@ fn measure(view: &webkit6::WebView) {
 /// Re-measures every HTML body (after the pane's width changed).
 pub fn remeasure() {
     for v in with(|r| r.views.clone()).unwrap_or_default() {
-        measure(&v);
+        measure(&v, true);
     }
 }

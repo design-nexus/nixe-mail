@@ -282,26 +282,55 @@ pub fn scheduled_card(s: &Scheduled) -> gtk::Widget {
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     let edit = widgets::icon_button("document-edit-symbolic", "Don't send it yet: back to Drafts to change it");
     let op = s.op;
-    edit.connect_clicked(move |_| {
-        engine::unschedule(op, |r| match r {
-            Ok(draft) => compose::open(Start::Draft(draft)),
-            Err(e) => window::toast(&e),
-        })
-    });
+    edit.connect_clicked(move |_| edit_scheduled(op));
     actions.append(&edit);
     let discard = widgets::icon_button("user-trash-symbolic", "Don't send it (it's discarded)");
-    discard.connect_clicked(move |_| {
-        engine::unschedule(op, |r| match r {
-            Ok(draft) => {
-                engine::delete_draft(draft);
-                window::toast("It won't be sent.");
-            }
-            Err(e) => window::toast(&e),
-        })
-    });
+    discard.connect_clicked(move |_| discard_scheduled(op));
     actions.append(&discard);
     card.append(&actions);
     card.upcast()
+}
+
+/// Mail scheduled for later goes back to Drafts and opens to be changed.
+pub fn edit_scheduled(op: i64) {
+    engine::unschedule(op, |r| match r {
+        Ok(draft) => compose::open(Start::Draft(draft)),
+        Err(e) => window::toast(&e),
+    })
+}
+
+/// Mail scheduled for later won't be sent.
+pub fn discard_scheduled(op: i64) {
+    engine::unschedule(op, |r| match r {
+        Ok(draft) => {
+            engine::delete_draft(draft);
+            window::toast("It won't be sent.");
+        }
+        Err(e) => window::toast(&e),
+    })
+}
+
+/// Archives everything of a sender's in the inbox.
+pub fn archive_all_from(address: &str) {
+    let inboxes = data::View::All(nixe_mail_core::db::Role::Inbox).mailboxes(&data::mailboxes());
+    let ids = data::messages_from(address, &inboxes);
+    if ids.is_empty() {
+        window::toast("None of their mail is in the inbox.");
+        return;
+    }
+    engine::move_to(&ids, "archive");
+    window::toast(&format!(
+        "Archived {} from {address}.",
+        if ids.len() == 1 { "1 message".to_string() } else { format!("{} messages", ids.len()) }
+    ));
+}
+
+/// The open conversation's unsubscribe link, if its sender offers one.
+pub fn unsubscribe_link() -> Option<String> {
+    let (_, theirs) = open_messages()?;
+    let sender = theirs?;
+    let inboxes = data::View::All(nixe_mail_core::db::Role::Inbox).mailboxes(&data::mailboxes());
+    data::sender(&sender.from_addr, &inboxes).and_then(|s| s.unsubscribe).or_else(|| list_unsubscribe(&sender))
 }
 
 /// A sender: where their mail goes, the Screener, unsubscribing, archiving.
@@ -341,19 +370,7 @@ pub fn sender_card(s: &SenderRow) -> gtk::Widget {
     }
     let archive = widgets::icon_button("nixe-mail-archive-symbolic", "Archive all their mail in the inbox");
     let address = s.address.clone();
-    archive.connect_clicked(move |_| {
-        let inboxes = data::View::All(nixe_mail_core::db::Role::Inbox).mailboxes(&data::mailboxes());
-        let ids = data::messages_from(&address, &inboxes);
-        if ids.is_empty() {
-            window::toast("None of their mail is in the inbox.");
-            return;
-        }
-        engine::move_to(&ids, "archive");
-        window::toast(&format!(
-            "Archived {} from {address}.",
-            if ids.len() == 1 { "1 message".to_string() } else { format!("{} messages", ids.len()) }
-        ));
-    });
+    archive.connect_clicked(move |_| archive_all_from(&address));
     group.append(&widgets::row("Archive all", "Everything of theirs in the inbox.", Some(archive.upcast_ref())));
     card.append(&group);
     card.upcast()

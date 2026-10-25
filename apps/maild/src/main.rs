@@ -33,6 +33,7 @@ const XML: &str = r#"<node><interface name="io.github.design_nexus.nixe.MailEngi
   <method name="Unschedule"><arg type="x" name="op" direction="in"/><arg type="x" name="draft" direction="out"/></method>
   <method name="SetSender"><arg type="s" name="address" direction="in"/><arg type="s" name="choice" direction="in"/></method>
   <method name="SetScreener"><arg type="b" name="on" direction="in"/></method>
+  <method name="SetSetting"><arg type="s" name="key" direction="in"/><arg type="s" name="value" direction="in"/></method>
   <method name="Snooze"><arg type="x" name="message" direction="in"/><arg type="x" name="until" direction="in"/></method>
   <method name="FollowUp"><arg type="x" name="message" direction="in"/><arg type="x" name="due" direction="in"/></method>
   <signal name="Changed"><arg type="s" name="what"/></signal>
@@ -172,6 +173,11 @@ fn serve(conn: &gio::DBusConnection, engine: tokio::sync::mpsc::UnboundedSender<
                     let screened =
                         choice.get("screened").map(|v| v.as_str().filter(|s| matches!(*s, "in" | "out")).map(str::to_string));
                     send(Command::SetSender { address, kind, screened });
+                    invocation.return_value(None);
+                }
+                "SetSetting" => {
+                    let Some((key, value)) = params.get::<(String, String)>() else { return bad(invocation) };
+                    send(Command::SetSetting(key, value));
                     invocation.return_value(None);
                 }
                 "SetScreener" => {

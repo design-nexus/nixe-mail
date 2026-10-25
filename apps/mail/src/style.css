@@ -270,3 +270,9 @@ window.mail-window .reader-bar button {
 .menu-list .group-title {
   margin: 4px 8px;
 }
+
+/* The list's Show only unread toggle, while it's on. */
+window.mail-window button.unread-toggle:checked {
+  background: @nav_active;
+  color: @theme_accent;
+}

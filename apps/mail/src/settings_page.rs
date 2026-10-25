@@ -10,6 +10,8 @@ pub fn build(page: &Page) {
     window_group(page);
     reading(page);
     writing(page);
+    notifications(page);
+    checking(page);
     accounts(page);
     keyboard(page);
 }
@@ -58,12 +60,44 @@ fn window_group(page: &Page) {
 fn reading(page: &Page) {
     let group = page.group("Reading");
     let prefs = prefs::get();
-    let (row, _) = widgets::switch_row(
-        "Mark as read when opened",
-        "Off: conversations stay unread until you mark them (U).",
-        prefs.mark_read,
-        |on| prefs::update(|p| p.mark_read = on),
+    let current = match (prefs.mark_read, prefs.mark_read_delay) {
+        (false, _) => "never",
+        (true, 0) => "open",
+        (true, _) => "delay",
+    };
+    let (row, _) = widgets::choice_row(
+        "Mark as read",
+        "When a conversation counts as read. Mark one yourself any time with U.",
+        opts(&[("open", "When opened"), ("delay", "After 3 seconds open"), ("never", "Only when I mark it")]),
+        current,
+        |id| {
+            prefs::update(|p| {
+                p.mark_read = id != "never";
+                p.mark_read_delay = if id == "delay" { 3 } else { 0 };
+            })
+        },
     );
+    group.add(&row);
+    let (row, _) = widgets::switch_row(
+        "Open the first conversation",
+        "Going to a mailbox shows its newest conversation. It's marked read when you go on to another one.",
+        prefs.open_first,
+        |on| prefs::update(|p| p.open_first = on),
+    );
+    group.add(&row);
+    let (row, _) = widgets::choice_row(
+        "After archiving or deleting",
+        "What the reading pane shows once a conversation leaves the list.",
+        opts(&[("next", "The next conversation"), ("previous", "The previous one"), ("list", "Nothing (back to the list)")]),
+        &prefs.after_moving,
+        |id| prefs::update(|p| p.after_moving = id),
+    );
+    group.add(&row);
+    let (row, _) =
+        widgets::switch_row("Show previews", "The first lines of each message under its subject.", prefs.show_previews, |on| {
+            prefs::update(|p| p.show_previews = on);
+            window::reload();
+        });
     group.add(&row);
     let (row, _) = widgets::switch_row(
         "Screener",
@@ -72,6 +106,20 @@ fn reading(page: &Page) {
         crate::engine::set_screener,
     );
     group.add(&row);
+    let (row, _) = widgets::choice_row(
+        "Images from the web",
+        "Images in messages come from the sender's servers, which then know you opened it.",
+        opts(&[("ask", "Ask for each sender"), ("always", "Always show")]),
+        if prefs.images_always { "always" } else { "ask" },
+        |id| {
+            prefs::update(|p| p.images_always = id == "always");
+            crate::reader::refresh();
+        },
+    );
+    group.add(&row);
+    if prefs.images_always {
+        return;
+    }
     let count = prefs.remote_senders.len();
     let desc = match count {
         0 => "Images from the web stay hidden in every message until you show them.".to_string(),
@@ -85,7 +133,52 @@ fn reading(page: &Page) {
         b.set_sensitive(false);
         window::toast("Images from the web are hidden for every sender.");
     });
-    group.add(&widgets::row("Images from the web", &desc, Some(clear.upcast_ref())));
+    group.add(&widgets::row("Senders you chose", &desc, Some(clear.upcast_ref())));
+}
+
+fn opts(items: &[(&str, &str)]) -> Vec<(String, String)> {
+    items.iter().map(|(id, name)| (id.to_string(), name.to_string())).collect()
+}
+
+fn notifications(page: &Page) {
+    let group = page.group("Notifications");
+    let engine = data::engine_settings();
+    let (row, _) = widgets::switch_row(
+        "New mail",
+        "A notification when mail arrives in the Imbox while Mail isn't in front. Never for The Feed, Paper Trail or the Screener.",
+        engine.notify,
+        |on| crate::engine::set_setting("notify", if on { "on" } else { "off" }),
+    );
+    group.add(&row);
+}
+
+fn checking(page: &Page) {
+    let group = page.group("Checking mail");
+    let engine = data::engine_settings();
+    let every = engine.check_every.to_string();
+    let (row, _) = widgets::choice_row(
+        "Check for new mail",
+        "Gmail and other IMAP accounts also hear about new mail at once while Mail is running.",
+        opts(&[
+            ("2", "Every 2 minutes"),
+            ("5", "Every 5 minutes"),
+            ("15", "Every 15 minutes"),
+            ("30", "Every 30 minutes"),
+            ("0", "Only when I check (Ctrl+R)"),
+        ]),
+        &every,
+        |id| crate::engine::set_setting("check_every", &id),
+    );
+    group.add(&row);
+    let days = engine.body_days.to_string();
+    let (row, _) = widgets::choice_row(
+        "Keep for reading offline",
+        "Whole messages this recent are downloaded; older ones download when you open them.",
+        opts(&[("7", "The last week"), ("30", "The last month"), ("90", "The last 3 months"), ("365", "The last year")]),
+        &days,
+        |id| crate::engine::set_setting("body_days", &id),
+    );
+    group.add(&row);
 }
 
 fn writing(page: &Page) {
@@ -141,6 +234,8 @@ fn accounts(page: &Page) {
     let group = page.group("Accounts");
     group.note("Mail accounts come from Settings → Online Accounts (with Mail switched on). Passwords and sign-ins stay there.");
     if let Some(status) = window::status() {
+        let off = data::disabled_accounts();
+        let mut shown: Vec<String> = Vec::new();
         for a in &status.accounts {
             let desc = match (&a.error, a.offline, a.last_sync) {
                 (Some(e), _, _) => e.clone(),
@@ -148,7 +243,11 @@ fn accounts(page: &Page) {
                 (None, false, Some(t)) => format!("Updated {}", window::when_text(t, true)),
                 _ => "Not checked yet".into(),
             };
-            group.add(&widgets::row(&a.address, &desc, None));
+            shown.push(a.id.clone());
+            group.add(&account_switch(&a.id, &a.address, &desc, true));
+        }
+        for a in data::all_accounts().into_iter().filter(|a| off.contains(&a.id) && !shown.contains(&a.id)) {
+            group.add(&account_switch(&a.id, &a.address, "Off: not checked or shown. Its mail stays on this computer.", false));
         }
         for s in &status.skipped {
             group.add(&widgets::row(&s.address, &s.reason, None));
@@ -161,6 +260,12 @@ fn accounts(page: &Page) {
         "Add, sign in to or remove Google, Fastmail, iCloud and other mail accounts.",
         Some(open.upcast_ref()),
     ));
+}
+
+fn account_switch(id: &str, address: &str, desc: &str, on: bool) -> gtk::Widget {
+    let id = id.to_string();
+    let (row, _) = widgets::switch_row(address, desc, on, move |on| crate::engine::set_account_enabled(&id, on));
+    row.upcast()
 }
 
 fn keyboard(page: &Page) {

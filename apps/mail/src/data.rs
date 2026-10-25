@@ -119,19 +119,47 @@ impl View {
             Screen::Cleared
         };
         match self {
-            Self::Kind(kind) => Filter { kind: Some(*kind), screen, snoozed: false },
+            Self::Kind(kind) => Filter { kind: Some(*kind), screen, ..Filter::default() },
             Self::Snoozed => Filter { snoozed: true, ..Filter::default() },
             _ => Filter { screen, ..Filter::default() },
         }
     }
 }
 
+/// Accounts shown in Mail (not the ones turned off in Settings).
 pub fn accounts() -> Vec<AccountRow> {
+    let off = disabled_accounts();
+    all_accounts().into_iter().filter(|a| !off.contains(&a.id)).collect()
+}
+
+/// Every account Mail knows, turned off or not.
+pub fn all_accounts() -> Vec<AccountRow> {
     with(|db| db.accounts())
 }
 
+/// The mailboxes of the accounts shown.
 pub fn mailboxes() -> Vec<Mailbox> {
-    with(|db| db.mailboxes(None))
+    let off = disabled_accounts();
+    with(|db| db.mailboxes(None)).into_iter().filter(|m| !off.contains(&m.account)).collect()
+}
+
+pub fn disabled_accounts() -> Vec<String> {
+    with(|db| Ok(db.disabled_accounts()))
+}
+
+pub fn unread_ids(mailboxes: &[i64]) -> Vec<i64> {
+    with(|db| db.unread_ids(mailboxes))
+}
+
+/// The engine's settings, as Settings shows them.
+pub struct EngineSettings {
+    pub notify: bool,
+    pub check_every: u64,
+    pub body_days: i64,
+}
+
+pub fn engine_settings() -> EngineSettings {
+    with(|db| Ok(EngineSettings { notify: db.notify_new_mail(), check_every: db.check_every(), body_days: db.body_days() }))
 }
 
 pub fn list(mailboxes: &[i64], limit: usize) -> Vec<ListItem> {
@@ -168,6 +196,12 @@ pub fn scheduled() -> Vec<Scheduled> {
 
 pub fn follow_ups() -> Vec<FollowUp> {
     with(|db| db.follow_ups())
+}
+
+impl Default for EngineSettings {
+    fn default() -> Self {
+        Self { notify: true, check_every: 5, body_days: 30 }
+    }
 }
 
 pub fn snoozed_until(thread: &str) -> Option<i64> {

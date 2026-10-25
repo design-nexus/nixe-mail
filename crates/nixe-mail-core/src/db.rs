@@ -630,6 +630,16 @@ impl Db {
     }
 
     /// Forgets messages the server no longer has.
+    /// Unread messages in these mailboxes (for Mark all as read).
+    pub fn unread_ids(&self, mailboxes: &[i64]) -> rusqlite::Result<Vec<i64>> {
+        let mut out = Vec::new();
+        let mut stmt = self.conn.prepare("SELECT id FROM messages WHERE mailbox = ?1 AND flags & 1 = 0 AND flags & 16 = 0")?;
+        for mailbox in mailboxes {
+            out.extend(stmt.query_map(params![mailbox], |r| r.get::<_, i64>(0))?.collect::<rusqlite::Result<Vec<_>>>()?);
+        }
+        Ok(out)
+    }
+
     pub fn remove_uids(&self, mailbox: i64, uidvalidity: u32, uids: &[u32]) -> rusqlite::Result<usize> {
         let mut n = 0;
         for uid in uids {
@@ -717,6 +727,9 @@ impl Db {
             Screen::Pending => wanted.push(format!("m.screened IS NULL AND NOT {cleared}")),
             Screen::Out => wanted.push("COALESCE(m.screened, '') = 'out'".into()),
         }
+        if filter.unread {
+            wanted.push("(l.unread = 1 OR m.thread = ?3)".into());
+        }
         let wanted = if wanted.is_empty() { String::new() } else { format!("WHERE {}", wanted.join(" AND ")) };
         let sql = format!(
             "WITH shown AS (
@@ -732,7 +745,12 @@ impl Db {
              GROUP BY m.thread ORDER BY m.date DESC LIMIT ?1 OFFSET ?2"
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        stmt.query_map(params![limit as i64, offset as i64], list_row)?.collect()
+        let keep = filter.keep.clone().unwrap_or_default();
+        if filter.unread {
+            stmt.query_map(params![limit as i64, offset as i64, keep], list_row)?.collect()
+        } else {
+            stmt.query_map(params![limit as i64, offset as i64], list_row)?.collect()
+        }
     }
 
     /// People to suggest as recipients: whose name or address contains `query`,
@@ -981,7 +999,7 @@ fn list_row(r: &rusqlite::Row) -> rusqlite::Result<ListItem> {
 
 mod graph;
 mod organize;
-pub use organize::{FollowUp, Scheduled, SenderRow};
+pub use organize::{BODY_DAYS, CHECK_EVERY, DISABLED_ACCOUNTS, FollowUp, NOTIFY, Scheduled, SenderRow};
 
 #[cfg(test)]
 mod tests;

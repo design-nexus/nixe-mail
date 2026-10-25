@@ -22,6 +22,20 @@ pub struct Prefs {
     pub signature: String,
     /// The account new messages are from, when there's a choice.
     pub default_account: String,
+    /// Seconds a conversation stays open before it's marked read (with `mark_read`).
+    pub mark_read_delay: u32,
+    /// Images and other web content load in every message, without asking.
+    pub images_always: bool,
+    /// The first lines of each message under its subject in the list.
+    pub show_previews: bool,
+    /// After Archive, Trash or Junk: `next`, `previous` or `list`.
+    pub after_moving: String,
+    /// Accounts whose folders are folded away in the sidebar.
+    pub collapsed_accounts: Vec<String>,
+    /// Folders in the sidebar's Pinned group, as `account` + `\u{1f}` + IMAP name.
+    pub pinned: Vec<String>,
+    /// Show a mailbox's first conversation in the reading pane on going to it.
+    pub open_first: bool,
 }
 
 impl Default for Prefs {
@@ -37,6 +51,13 @@ impl Default for Prefs {
             remote_senders: Vec::new(),
             signature: String::new(),
             default_account: String::new(),
+            mark_read_delay: 0,
+            images_always: false,
+            show_previews: true,
+            after_moving: "next".into(),
+            collapsed_accounts: Vec::new(),
+            pinned: Vec::new(),
+            open_first: true,
         }
     }
 }
@@ -51,7 +72,13 @@ pub fn twelve_hour() -> bool {
 
 /// Whether web content from this sender loads without asking.
 pub fn trusts(sender: &str) -> bool {
-    get().remote_senders.iter().any(|s| s.eq_ignore_ascii_case(sender))
+    let p = get();
+    p.images_always || p.remote_senders.iter().any(|s| s.eq_ignore_ascii_case(sender))
+}
+
+/// How a pinned folder is remembered (ids can change; account and name don't).
+pub fn pin_key(account: &str, name: &str) -> String {
+    format!("{account}\u{1f}{name}")
 }
 
 nixe_core::prefs_store!(Prefs);

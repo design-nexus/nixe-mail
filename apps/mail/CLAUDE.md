@@ -42,6 +42,14 @@
   Graph (delta per folder, Graph ids mapped to UIDs in `graph_items`); maild's
   `accounts::Backend::Graph`, polled every 3 min (`NIXE_MAIL_POLL_SECONDS` in tests). Never
   hold a `state.borrow()` across an `.await` (a `match` on it does).
+- Right-click menus (`menus.rs`, built with `widgets::popup_menu`/`on_right_click`; Menu
+  key or Shift+F10 for the selected row): list rows (a right-click selects the row
+  without marking it read: `window::select_quietly`), folders (Pin, Mark all as read),
+  the all-accounts mailboxes and account headings (fold, turn off in Mail). Pinned
+  folders and folded accounts are prefs (`pinned` keys are `account` + U+001F + name).
+  Engine settings (`notify`, `check_every`, `body_days`, `disabled_accounts`) go through
+  `MailEngine1.SetSetting` into `mail.sqlite`'s settings table; turned-off accounts keep
+  their mail and are filtered out by `data::accounts()`/`data::mailboxes()`.
 - Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
   `tools/test-imap.sh` (Dovecot + SMTP sink + the engine on a private bus).
   Layout: `tools/test-imap.sh --run SCRIPT` gives a scratch server; snapshots with

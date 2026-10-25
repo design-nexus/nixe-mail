@@ -189,6 +189,21 @@ pub fn set_sender(address: &str, choice: serde_json::Value) {
     fire("SetSender", (address, choice.to_string()).to_variant());
 }
 
+/// One of the engine's settings (`notify`, `check_every`, `body_days`, `disabled_accounts`).
+pub fn set_setting(key: &str, value: &str) {
+    fire("SetSetting", (key, value).to_variant());
+}
+
+/// Turns an account off in Mail (not synced or shown; its mail stays) or back on.
+pub fn set_account_enabled(id: &str, on: bool) {
+    let mut off = crate::data::disabled_accounts();
+    off.retain(|a| a != id);
+    if !on {
+        off.push(id.to_string());
+    }
+    set_setting("disabled_accounts", &serde_json::to_string(&off).unwrap_or_else(|_| "[]".into()));
+}
+
 pub fn set_screener(on: bool) {
     fire("SetScreener", (on,).to_variant());
 }

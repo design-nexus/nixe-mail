@@ -363,3 +363,41 @@ fn stored_mail_is_sorted_again_once() {
     assert_eq!(db.resort(headers).unwrap(), 0, "only once per version of the rules");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn engine_settings() {
+    let (db, _dir) = db();
+    assert!(db.notify_new_mail());
+    assert_eq!((db.check_every(), db.body_days()), (5, 30));
+    assert!(db.disabled_accounts().is_empty());
+    assert!(db.set_engine_setting("notify", "off").unwrap());
+    assert!(db.set_engine_setting("check_every", "15").unwrap());
+    assert!(db.set_engine_setting("body_days", "90").unwrap());
+    assert!(db.set_engine_setting("disabled_accounts", r#"["a"]"#).unwrap());
+    assert!(!db.notify_new_mail());
+    assert_eq!((db.check_every(), db.body_days()), (15, 90));
+    assert_eq!(db.disabled_accounts(), ["a"]);
+    // Anything else is refused.
+    assert!(!db.set_engine_setting("screener_since", "1").unwrap());
+    assert!(!db.set_engine_setting("notify", "maybe").unwrap());
+    assert!(!db.set_engine_setting("body_days", "-3").unwrap());
+    assert!(!db.notify_new_mail());
+}
+
+#[test]
+fn unread_only_keeps_the_open_conversation() {
+    let (db, _dir) = db();
+    db.upsert_account("a", "me@example.com", "").unwrap();
+    let inbox = db.upsert_mailbox("a", "INBOX", Some("/"), Some(Role::Inbox)).unwrap();
+    let mut read = msg(1, "r@x", None, "Read one", 100, "x");
+    read.flags = SEEN;
+    db.put_message("a", inbox, &read).unwrap();
+    db.put_message("a", inbox, &msg(2, "u@x", None, "Unread one", 200, "x")).unwrap();
+    let mut filter = crate::organize::Filter { unread: true, ..Default::default() };
+    let subjects = |f: &crate::organize::Filter| -> Vec<String> {
+        db.list_with(&[inbox], f, 50, 0).unwrap().into_iter().map(|m| m.subject).collect()
+    };
+    assert_eq!(subjects(&filter), ["Unread one"]);
+    filter.keep = Some(db.list(&[inbox], 50, 0).unwrap().iter().find(|m| m.subject == "Read one").unwrap().thread.clone());
+    assert_eq!(subjects(&filter), ["Unread one", "Read one"]);
+}
