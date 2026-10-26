@@ -59,3 +59,8 @@
   interface (D-Bus, no auto-start; starts `nixe-reminders` and retries ~15 s) with
   `source = nixe-mail:message/ID`. The desktop file handles `x-scheme-handler/nixe-mail`, and
   `main.rs` opens such a link like `--message ID`.
+- Aliases (prefs `aliases`: account, name, email; Settings → Writing) join that account's
+  From choices and `data::own_addresses`; a reply to a message sent to one comes from it.
+- IMAP sync enables QRESYNC when offered: the CHANGEDSINCE flag fetch adds VANISHED, read
+  from the session's unsolicited responses, instead of a `UID SEARCH lo:*` expunge scan.
+  `NIXE_MAIL_NO_QRESYNC=1` forces the old path (`tools/test-imap.sh` passes both ways).

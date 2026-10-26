@@ -3,7 +3,8 @@
 //! Per mailbox: a changed UIDVALIDITY drops what was kept; new messages come in
 //! as headers (newest first, up to a window), flags are refreshed (only what
 //! changed when the server offers CONDSTORE), messages gone from the server
-//! are dropped, and the bodies of recent messages are fetched for offline
+//! are dropped (reported by the server with QRESYNC, else found by listing
+//! the UIDs it has), and the bodies of recent messages are fetched for offline
 //! reading. Changes made while offline wait in the `ops` table and are sent
 //! first; they're deltas (add or remove a flag, move), so the server's own
 //! changes in the meantime aren't overwritten.
@@ -113,6 +114,8 @@ pub struct Sync<'a> {
     pub account: &'a str,
     pub limits: Limits,
     capabilities: HashSet<String>,
+    /// QRESYNC is on: flag fetches also report expunged messages (VANISHED).
+    qresync: bool,
 }
 
 impl<'a> Sync<'a> {
@@ -124,8 +127,11 @@ impl<'a> Sync<'a> {
         limits: Limits,
     ) -> Result<Self, NetError> {
         let caps = session.capabilities().await?;
-        let capabilities = caps.iter().map(|c| format!("{c:?}").to_ascii_uppercase()).collect();
-        Ok(Self { session, db, store, account, limits, capabilities })
+        let capabilities: HashSet<String> = caps.iter().map(|c| format!("{c:?}").to_ascii_uppercase()).collect();
+        let qresync = capabilities.iter().any(|c| c.contains("QRESYNC"))
+            && std::env::var_os("NIXE_MAIL_NO_QRESYNC").is_none()
+            && session.run_command_and_check_ok("ENABLE QRESYNC").await.is_ok();
+        Ok(Self { session, db, store, account, limits, capabilities, qresync })
     }
 
     fn has(&self, cap: &str) -> bool {
@@ -182,9 +188,13 @@ impl<'a> Sync<'a> {
         }
         let mut local: Vec<(u32, i64)> = self.db.uids(id, validity).map_err(db_err)?;
         let highest_local = local.iter().map(|(u, _)| *u).max();
+        // What changed since the last sync, when the server keeps track of it.
+        let since = known.highestmodseq.filter(|_| condstore && known.uidvalidity == Some(validity));
+        let vanished = self.qresync && since.is_some();
 
-        // Messages gone from the server, within the range we keep.
-        if let Some(lowest) = local.iter().map(|(u, _)| *u).min() {
+        // Messages gone from the server, within the range we keep (with
+        // QRESYNC, the flag fetch below reports them instead).
+        if let Some(lowest) = local.iter().map(|(u, _)| *u).min().filter(|_| !vanished) {
             let on_server = self.session.uid_search(format!("UID {lowest}:*")).await?;
             let gone: Vec<u32> = local.iter().map(|(u, _)| *u).filter(|u| !on_server.contains(u)).collect();
             if !gone.is_empty() {
@@ -243,13 +253,29 @@ impl<'a> Sync<'a> {
 
         // Flag changes on messages we already had.
         if !local.is_empty() {
-            let since = known.highestmodseq.filter(|_| condstore && known.uidvalidity == Some(validity));
             let range = format!("{}:{}", local.iter().map(|(u, _)| *u).min().unwrap_or(1), highest_local.unwrap_or(1));
             let query = match since {
+                Some(m) if vanished => format!("(UID FLAGS MODSEQ) (CHANGEDSINCE {m} VANISHED)"),
                 Some(m) => format!("(UID FLAGS MODSEQ) (CHANGEDSINCE {m})"),
                 None => "(UID FLAGS)".to_string(),
             };
+            // VANISHED arrives among the unsolicited responses; drop older ones first.
+            while self.session.unsolicited_responses.try_recv().is_ok() {}
             let fetched: Vec<Fetch> = self.session.uid_fetch(range, query).await?.try_collect().await?;
+            if vanished {
+                let mut gone: Vec<u32> = Vec::new();
+                while let Ok(response) = self.session.unsolicited_responses.try_recv() {
+                    if let async_imap::types::UnsolicitedResponse::Other(data) = response
+                        && let async_imap::imap_proto::Response::Vanished { uids, .. } = data.parsed()
+                    {
+                        gone.extend(local.iter().map(|(u, _)| *u).filter(|u| uids.iter().any(|r| r.contains(u))));
+                    }
+                }
+                if !gone.is_empty() {
+                    report.removed += self.db.remove_uids(id, validity, &gone).map_err(db_err)?;
+                    local.retain(|(u, _)| !gone.contains(u));
+                }
+            }
             let current: std::collections::HashMap<u32, i64> = local.iter().copied().collect();
             for f in fetched {
                 let Some(uid) = f.uid else { continue };
