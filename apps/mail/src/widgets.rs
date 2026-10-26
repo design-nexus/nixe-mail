@@ -2,6 +2,15 @@
 
 pub use nixe_ui::widgets::*;
 
+/// nixe-ui's icon button, also named for screen readers (its tooltip, without
+/// the key hint in parentheses).
+pub fn icon_button(icon: &str, tooltip: &str) -> gtk::Button {
+    let b = nixe_ui::widgets::icon_button(icon, tooltip);
+    let name = tooltip.split(" (").next().unwrap_or(tooltip);
+    b.update_property(&[gtk::accessible::Property::Label(name)]);
+    b
+}
+
 use gtk::prelude::*;
 
 pub struct Page {

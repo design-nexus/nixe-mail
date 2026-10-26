@@ -1660,7 +1660,9 @@ fn status_bar() -> gtk::Box {
     readout.set_ellipsize(gtk::pango::EllipsizeMode::Start);
     STATUS.with(|s| *s.borrow_mut() = Some(readout.clone()));
     bar.append(&readout);
-    bar.append(&chrome::gear(settings_dialog::open));
+    let gear = chrome::gear(settings_dialog::open);
+    gear.update_property(&[gtk::accessible::Property::Label("Settings")]);
+    bar.append(&gear);
     bar
 }
 
