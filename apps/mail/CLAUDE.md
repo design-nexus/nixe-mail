@@ -55,3 +55,7 @@
   Layout: `tools/test-imap.sh --run SCRIPT` gives a scratch server; snapshots with
   `MAIL_SNAPSHOT=/tmp/m.png MAIL_SNAPSHOT_SELECT=N` (or `_COMPOSE`, `_W`), with
   `GTK_A11Y=none` on a private bus. Web content isn't in widget snapshots.
+- "Add to Reminders" (`reminders.rs`): calls Reminders' `reminders.create` over its Control
+  interface (D-Bus, no auto-start; starts `nixe-reminders` and retries ~15 s) with
+  `source = nixe-mail:message/ID`. The desktop file handles `x-scheme-handler/nixe-mail`, and
+  `main.rs` opens such a link like `--message ID`.

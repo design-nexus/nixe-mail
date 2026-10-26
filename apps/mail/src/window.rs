@@ -1403,6 +1403,7 @@ fn build(app: &gtk::Application) {
 
     let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some("Find messages: people, words, subjects"));
+    search.update_property(&[gtk::accessible::Property::Label("Find messages")]);
     search.set_visible(false);
     search.connect_search_changed(|_| {
         if let Some(ui) = ui() {
@@ -1445,6 +1446,7 @@ fn build(app: &gtk::Application) {
     let unread_toggle = gtk::ToggleButton::new();
     unread_toggle.set_icon_name("mail-unread-symbolic");
     unread_toggle.set_tooltip_text(Some("Show only unread (Shift+U)"));
+    unread_toggle.update_property(&[gtk::accessible::Property::Label("Show only unread")]);
     unread_toggle.add_css_class("flat");
     unread_toggle.add_css_class("icon-button");
     unread_toggle.add_css_class("unread-toggle");

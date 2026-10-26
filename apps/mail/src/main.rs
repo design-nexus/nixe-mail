@@ -8,6 +8,7 @@ mod menus;
 mod organize;
 mod prefs;
 mod reader;
+mod reminders;
 mod settings_dialog;
 mod settings_page;
 mod suggest;
@@ -24,7 +25,7 @@ const USAGE: &str = "Usage: nixe-mail [OPTIONS] [mailto:…]\n\
 \n\
   mailto:ADDRESS  write a message (from a mailto: link)\n\
   --compose       write a new message\n\
-  --message ID    show a message's conversation\n\
+  --message ID    show a message's conversation (or a nixe-mail:message/ID link)\n\
   --section ID    open inbox, drafts, sent, archive, junk, trash, mailbox:ID or settings\n\
   --toggle        close the window if it's open, otherwise open it\n\
   --describe      print the control tools (JSON) and exit\n";
@@ -63,7 +64,9 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::SUCCESS;
         }
         window::present(app, value("--section").as_deref());
-        if let Some(id) = value("--message").and_then(|v| v.parse::<i64>().ok())
+        // A nixe-mail: link (a reminder's "From") names a message too.
+        let linked = argv.iter().skip(1).find_map(|a| reminders::message_of(a));
+        if let Some(id) = value("--message").and_then(|v| v.parse::<i64>().ok()).or(linked)
             && !window::open_message(id)
         {
             window::toast("That message isn't on this computer any more.");

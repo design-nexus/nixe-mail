@@ -112,6 +112,7 @@ pub fn snooze_button() -> gtk::MenuButton {
     button.set_icon_name("alarm-symbolic");
     button.set_has_frame(false);
     button.set_tooltip_text(Some("Snooze (Z)"));
+    button.update_property(&[gtk::accessible::Property::Label("Snooze")]);
     button.add_css_class("flat");
     button.add_css_class("icon-button");
     // Built each time it opens: the times move on.
@@ -143,6 +144,7 @@ pub fn more_button() -> gtk::MenuButton {
     button.set_icon_name("view-more-symbolic");
     button.set_has_frame(false);
     button.set_tooltip_text(Some("Follow up, sender"));
+    button.update_property(&[gtk::accessible::Property::Label("More: follow up, sender")]);
     button.add_css_class("flat");
     button.add_css_class("icon-button");
     button.set_create_popup_func(fill_more);

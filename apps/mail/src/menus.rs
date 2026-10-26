@@ -6,7 +6,7 @@ use crate::compose::{self, Start};
 use crate::data::{self, View};
 use crate::widgets::{self, MenuEntry, danger, disabled, item, keyed, separator, sub};
 use crate::window::{self, Row};
-use crate::{engine, organize, prefs, reader};
+use crate::{engine, organize, prefs, reader, reminders};
 use gtk::prelude::*;
 use nixe_mail_core::AccountRow;
 use nixe_mail_core::db::{Mailbox, Role};
@@ -98,6 +98,17 @@ fn conversation() -> Vec<MenuEntry> {
         remind.push(item("Don't remind me", move || engine::follow_up(id, 0)));
     }
     out.push(sub("Remind me if nobody answers", remind));
+    let (subject, from) = (newest.subject.clone(), if newest.from_name.is_empty() { newest.from_addr.clone() } else { newest.from_name.clone() });
+    out.push(sub(
+        "Add to Reminders",
+        reminders::times()
+            .into_iter()
+            .map(|(label, due)| {
+                let (id, title, notes) = (newest.id, reminders::title(&subject, &from), format!("From {from}"));
+                item(&label, move || reminders::add(title.clone(), notes.clone(), due.clone(), id))
+            })
+            .collect(),
+    ));
 
     out.push(separator());
     if role != Some(Role::Archive) {

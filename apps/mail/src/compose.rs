@@ -243,6 +243,7 @@ fn build(draft: Draft, draft_id: Option<i64>, answering: Option<i64>, title: &st
     send_button.add_css_class("suggested-action");
     send_button.add_css_class("send-button");
     send_button.set_tooltip_text(Some("Send (Ctrl+Enter)"));
+    send_button.update_property(&[gtk::accessible::Property::Label("Send")]);
     send_button.set_valign(gtk::Align::Center);
     bar.append(&attach);
     bar.append(&more);
@@ -252,6 +253,7 @@ fn build(draft: Draft, draft_id: Option<i64>, answering: Option<i64>, title: &st
     options.set_icon_name("pan-down-symbolic");
     options.set_has_frame(false);
     options.set_tooltip_text(Some("Send later, or hear if nobody answers"));
+    options.update_property(&[gtk::accessible::Property::Label("Send options")]);
     options.add_css_class("flat");
     options.add_css_class("icon-button");
     options.set_valign(gtk::Align::Center);
