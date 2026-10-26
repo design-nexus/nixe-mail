@@ -1,3 +1,4 @@
+# Builds, packages and publishes a release for the tag given.
 name: Standalone release
 on:
   workflow_dispatch:
