@@ -228,6 +228,100 @@ fn writing(page: &Page) {
     frame.set_child(Some(&text));
     row.append(&frame);
     group.add(&row);
+    group.add(&aliases_row());
+}
+
+/// Other From addresses: the list, and a line to add one.
+fn aliases_row() -> gtk::Widget {
+    let row = widgets::vbox(8);
+    row.add_css_class("settings-option");
+    row.add_css_class("stacked");
+    let title = widgets::label("Send from other addresses", "option-title");
+    title.set_xalign(0.0);
+    row.append(&title);
+    let desc = widgets::label(
+        "Aliases appear under their account in From, and replies to them come from them. The account's provider must let it send as the address (Gmail: “Send mail as”).",
+        "option-desc",
+    );
+    desc.set_xalign(0.0);
+    desc.set_wrap(true);
+    row.append(&desc);
+    let list = widgets::vbox(4);
+    row.append(&list);
+    fill_aliases(&list);
+
+    let accounts: Vec<(String, String)> = data::accounts().into_iter().map(|a| (a.id, a.address)).collect();
+    if accounts.is_empty() {
+        return row.upcast();
+    }
+    let add = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    let account = widgets::dropdown(&accounts, &accounts[0].0);
+    account.update_property(&[gtk::accessible::Property::Label("Account")]);
+    let name = gtk::Entry::new();
+    name.set_placeholder_text(Some("Name"));
+    name.set_width_chars(8);
+    name.update_property(&[gtk::accessible::Property::Label("Name to send as")]);
+    let email = gtk::Entry::new();
+    email.set_placeholder_text(Some("me@example.com"));
+    email.set_hexpand(true);
+    email.update_property(&[gtk::accessible::Property::Label("Address to send from")]);
+    let button = widgets::icon_button("list-add-symbolic", "Add this address");
+    // Two lines, so the card fits a half-screen window.
+    row.append(&account);
+    add.append(&name);
+    add.append(&email);
+    add.append(&button);
+    row.append(&add);
+    let save = {
+        let (account, name, email, list) = (account.clone(), name.clone(), email.clone(), list.clone());
+        move || {
+            let address = email.text().trim().to_string();
+            if !address.contains('@') || address.contains(char::is_whitespace) {
+                window::toast("Enter an address like me@example.com.");
+                return;
+            }
+            let Some((id, _)) = accounts.get(account.selected() as usize).cloned() else { return };
+            prefs::update(|p| {
+                p.aliases.retain(|a| !(a.account == id && a.email.eq_ignore_ascii_case(&address)));
+                p.aliases.push(prefs::Alias { account: id.clone(), name: name.text().trim().to_string(), email: address.clone() });
+            });
+            name.set_text("");
+            email.set_text("");
+            fill_aliases(&list);
+        }
+    };
+    let s = save.clone();
+    button.connect_clicked(move |_| s());
+    email.connect_activate(move |_| save());
+    row.upcast()
+}
+
+fn fill_aliases(list: &gtk::Box) {
+    while let Some(child) = list.first_child() {
+        list.remove(&child);
+    }
+    let accounts = data::accounts();
+    for alias in prefs::get().aliases {
+        let line = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let shown = if alias.name.is_empty() { alias.email.clone() } else { format!("{} <{}>", alias.name, alias.email) };
+        let text = widgets::label(&shown, "");
+        text.set_xalign(0.0);
+        text.set_hexpand(true);
+        text.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        line.append(&text);
+        let owner = accounts.iter().find(|a| a.id == alias.account).map(|a| a.address.clone()).unwrap_or_else(|| "an account that's off".into());
+        let via = widgets::label(&format!("via {owner}"), "option-desc");
+        via.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        line.append(&via);
+        let remove = widgets::icon_button("list-remove-symbolic", &format!("Stop sending from {}", alias.email));
+        let l = list.clone();
+        remove.connect_clicked(move |_| {
+            prefs::update(|p| p.aliases.retain(|a| *a != alias));
+            fill_aliases(&l);
+        });
+        line.append(&remove);
+        list.append(&line);
+    }
 }
 
 fn accounts(page: &Page) {

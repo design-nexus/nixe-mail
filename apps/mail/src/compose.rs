@@ -94,8 +94,16 @@ pub fn open(start: Start) {
         });
         return;
     }
-    let accounts: Vec<(String, Person)> =
-        data::accounts().into_iter().map(|a| (a.id.clone(), Person { name: a.name.clone(), email: a.address.clone() })).collect();
+    // Each account, then the aliases it sends from.
+    let aliases = prefs::get().aliases;
+    let mut accounts: Vec<(String, Person)> = Vec::new();
+    for a in data::accounts() {
+        accounts.push((a.id.clone(), Person { name: a.name.clone(), email: a.address.clone() }));
+        for alias in aliases.iter().filter(|x| x.account == a.id) {
+            let name = if alias.name.trim().is_empty() { a.name.clone() } else { alias.name.clone() };
+            accounts.push((a.id.clone(), Person { name, email: alias.email.clone() }));
+        }
+    }
     if accounts.is_empty() {
         window::toast("Add a mail account in Settings → Online Accounts first.");
         window::open_online_accounts();
@@ -108,6 +116,19 @@ pub fn open(start: Start) {
 
 fn account_person(accounts: &[(String, Person)], id: &str) -> Person {
     accounts.iter().find(|(a, _)| a == id).or(accounts.first()).map(|(_, p)| p.clone()).unwrap_or_default()
+}
+
+/// Who answers `row`: the account it arrived at, as the alias it was sent to
+/// when it went to one.
+fn reply_person(accounts: &[(String, Person)], row: &MessageRow) -> Person {
+    accounts
+        .iter()
+        .skip_while(|(a, _)| *a != row.account)
+        .skip(1)
+        .take_while(|(a, _)| *a == row.account)
+        .find(|(_, p)| row.recipients.iter().any(|(_, email)| email.eq_ignore_ascii_case(&p.email)))
+        .map(|(_, p)| p.clone())
+        .unwrap_or_else(|| account_person(accounts, &row.account))
 }
 
 fn default_account(accounts: &[(String, Person)]) -> String {
@@ -154,7 +175,7 @@ fn prepare(
         Start::ReplyWith { draft: given, .. } => {
             let (Some(row), Some(p)) = (original, parsed) else { return (None, None, None, "") };
             let me = data::own_addresses();
-            let from = account_person(accounts, &row.account);
+            let from = reply_person(accounts, row);
             let mut draft = send::reply(&p, false, &me, from, &row.account, &window::full_date(row.date));
             if !given.to.is_empty() {
                 draft.to = given.to;
@@ -171,7 +192,7 @@ fn prepare(
         Start::Reply { all, .. } => {
             let (Some(row), Some(p)) = (original, parsed) else { return (None, None, None, "") };
             let me = data::own_addresses();
-            let from = account_person(accounts, &row.account);
+            let from = reply_person(accounts, row);
             let mut draft = send::reply(&p, all, &me, from, &row.account, &window::full_date(row.date));
             draft.body = format!("{}{}", signature(), draft.body);
             (Some(draft), None, Some(row.id), if all { "Reply to all" } else { "Reply" })
@@ -191,7 +212,7 @@ fn prepare(
                     })
                 })
                 .collect();
-            let from = account_person(accounts, &row.account);
+            let from = reply_person(accounts, row);
             let mut draft = send::forward(&p, files, from, &row.account, &window::full_date(row.date));
             draft.body = format!("{}\n{}", signature(), draft.body);
             (Some(draft), None, None, "Forward")
@@ -267,7 +288,11 @@ fn build(draft: Draft, draft_id: Option<i64>, answering: Option<i64>, title: &st
         .collect();
     let from = gtk::DropDown::from_strings(&names.iter().map(String::as_str).collect::<Vec<_>>());
     from.set_hexpand(true);
-    let chosen = accounts.iter().position(|(a, _)| *a == draft.account).unwrap_or(0);
+    let chosen = accounts
+        .iter()
+        .position(|(a, p)| *a == draft.account && p.email.eq_ignore_ascii_case(&draft.from.email))
+        .or_else(|| accounts.iter().position(|(a, _)| *a == draft.account))
+        .unwrap_or(0);
     from.set_selected(chosen as u32);
     let from_row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     from_row.add_css_class("compose-field");

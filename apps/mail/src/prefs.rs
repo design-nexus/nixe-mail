@@ -36,6 +36,16 @@ pub struct Prefs {
     pub pinned: Vec<String>,
     /// Show a mailbox's first conversation in the reading pane on going to it.
     pub open_first: bool,
+    /// Other addresses an account sends from (its provider must allow them).
+    pub aliases: Vec<Alias>,
+}
+
+/// An address an account can send from besides its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Alias {
+    pub account: String,
+    pub name: String,
+    pub email: String,
 }
 
 impl Default for Prefs {
@@ -58,6 +68,7 @@ impl Default for Prefs {
             collapsed_accounts: Vec::new(),
             pinned: Vec::new(),
             open_first: true,
+            aliases: Vec::new(),
         }
     }
 }

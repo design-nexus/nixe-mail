@@ -263,5 +263,7 @@ pub fn parsed(row: &MessageRow) -> Option<(Vec<u8>, Parsed)> {
 
 /// Every address the user sends from.
 pub fn own_addresses() -> Vec<String> {
-    accounts().into_iter().map(|a| a.address).collect()
+    let mut own: Vec<String> = accounts().into_iter().map(|a| a.address).collect();
+    own.extend(crate::prefs::get().aliases.into_iter().map(|a| a.email));
+    own
 }
