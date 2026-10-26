@@ -1418,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "nixe-mail"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "glib",
@@ -1435,7 +1435,7 @@ dependencies = [
 
 [[package]]
 name = "nixe-mail-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ammonia",
  "async-imap",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "nixe-mail-glimpse"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "glimpse-plugin-sdk",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "nixe-maild"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "futures",
  "gio",

@@ -1,6 +1,6 @@
 [package]
 name = "nixe-mail-core"
-version = "0.1.0"
+version = "0.1.1"
 description = "Mail store, MIME, search and sync for Nixe Mail"
 edition.workspace = true
 license.workspace = true

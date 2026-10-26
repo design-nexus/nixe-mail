@@ -1,6 +1,6 @@
 [package]
 name = "nixe-maild"
-version = "0.1.0"
+version = "0.1.1"
 description = "Nixe Mail's engine: sync, sending and the offline queue, in the background"
 license.workspace = true
 repository.workspace = true

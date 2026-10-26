@@ -1,6 +1,6 @@
 [package]
 name = "nixe-mail-glimpse"
-version = "0.1.0"
+version = "0.1.1"
 description = "Glimpse search plugin for the mail on this computer"
 edition.workspace = true
 license.workspace = true
