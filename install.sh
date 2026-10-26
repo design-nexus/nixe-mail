@@ -273,12 +273,12 @@ for a in "${apps[@]}"; do
   fi
 
   if [[ $a == mail ]]; then
-    # The mail engine runs in the background; enabled for the next login, and
-    # started when Mail opens, so installing never starts anything.
+    # The mail engine runs in the background: enabled for login and started now
+    # (one already running keeps going).
     mkdir -p "$config/systemd/user"
     install -m 644 "$d/../maild/data/nixe-maild.service" "$config/systemd/user/nixe-maild.service"
     systemctl --user daemon-reload 2>/dev/null || true
-    systemctl --user enable nixe-maild.service >/dev/null 2>&1 || true
+    systemctl --user enable --now nixe-maild.service >/dev/null 2>&1 || true
   fi
 
   if [[ $a == passwords ]]; then
