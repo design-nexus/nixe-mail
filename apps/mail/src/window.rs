@@ -1725,6 +1725,7 @@ fn send_from_row(address: &str) -> gtk::Box {
     row.set_tooltip_text(Some("New mail is sent from this address"));
     let initial = address.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
     let avatar = widgets::label(&initial, "send-from-avatar");
+    avatar.set_xalign(0.5);
     avatar.set_valign(gtk::Align::Center);
     row.append(&avatar);
     let label = widgets::label(address, "send-from-address");
