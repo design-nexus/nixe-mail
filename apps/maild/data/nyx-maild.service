@@ -1,10 +1,10 @@
 [Unit]
-Description=Nixe Mail engine
+Description=Nyx Mail engine
 After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
-ExecStart=%h/.local/bin/nixe-maild
+ExecStart=%h/.local/bin/nyx-maild
 Restart=on-failure
 UMask=0077
 LimitCORE=0

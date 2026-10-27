@@ -1,8 +1,8 @@
-id = "nixe-mail"
+id = "nyx-mail"
 name = "Mail"
 version = "0.1.0"
 api_version = 1
-exec = ["./nixe-mail-glimpse"]
+exec = ["./nyx-mail-glimpse"]
 capabilities = ["search", "preview"]
 description = "Search the mail on this computer. Try mail, mail unread, or words, people and subjects."
 

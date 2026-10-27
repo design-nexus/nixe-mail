@@ -5,14 +5,14 @@
 //! Every test signs in as its own user, so each has its own empty mail store.
 
 use futures::TryStreamExt;
-use nixe_mail_core::db::{Db, Role};
-use nixe_mail_core::flags::{FLAGGED, SEEN};
-use nixe_mail_core::mime::Person;
-use nixe_mail_core::net::{self, Auth, NetError, Security, Server, Session};
-use nixe_mail_core::send::{self, Draft};
-use nixe_mail_core::store::Store;
-use nixe_mail_core::sync::{self, Limits, Report, Sync};
-use nixe_mail_core::testing::{Dovecot, Sink, env, now};
+use nyx_mail_core::db::{Db, Role};
+use nyx_mail_core::flags::{FLAGGED, SEEN};
+use nyx_mail_core::mime::Person;
+use nyx_mail_core::net::{self, Auth, NetError, Security, Server, Session};
+use nyx_mail_core::send::{self, Draft};
+use nyx_mail_core::store::Store;
+use nyx_mail_core::sync::{self, Limits, Report, Sync};
+use nyx_mail_core::testing::{Dovecot, Sink, env, now};
 use std::path::PathBuf;
 
 async fn session(user: &str) -> Result<Session, NetError> {
@@ -41,7 +41,7 @@ struct Local {
 
 impl Local {
     fn new(account: &str) -> Self {
-        let dir = PathBuf::from(env("NIXE_MAIL_TEST_DIR")).join("local").join(account);
+        let dir = PathBuf::from(env("NYX_MAIL_TEST_DIR")).join("local").join(account);
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
@@ -225,7 +225,7 @@ async fn changes_wait_while_the_server_is_down() {
     local.sync().await.unwrap();
     let id = local.id_of("INBOX", "Later");
 
-    run(&env("NIXE_MAIL_TEST_STOP"));
+    run(&env("NYX_MAIL_TEST_STOP"));
     wait_for_server(false).await;
     sync::queue_flags(&local.db, id, FLAGGED, 0).unwrap();
     let error = local.sync().await.unwrap_err();
@@ -234,7 +234,7 @@ async fn changes_wait_while_the_server_is_down() {
     assert_eq!(local.db.pending_ops().unwrap(), 1, "the change waits");
     assert_eq!(local.db.message(id).unwrap().unwrap().flags & FLAGGED, FLAGGED, "and shows here meanwhile");
 
-    run(&env("NIXE_MAIL_TEST_START"));
+    run(&env("NYX_MAIL_TEST_START"));
     wait_for_server(true).await;
     let report = local.sync().await.unwrap();
     assert_eq!(report.ops_sent, 1);
@@ -248,7 +248,7 @@ fn run(command: &str) {
 }
 
 async fn wait_for_server(up: bool) {
-    let addr = format!("127.0.0.1:{}", env("NIXE_MAIL_TEST_IMAPS"));
+    let addr = format!("127.0.0.1:{}", env("NYX_MAIL_TEST_IMAPS"));
     for _ in 0..100 {
         if tokio::net::TcpStream::connect(&addr).await.is_ok() == up {
             return;
@@ -270,7 +270,7 @@ async fn bad_password_is_a_sign_in_error() {
 #[ignore = "needs tools/test-imap.sh"]
 async fn send_then_save_to_sent() {
     let user = "sender";
-    let sink = Sink::start(&env("NIXE_MAIL_TEST_CERT"), &env("NIXE_MAIL_TEST_KEY")).await;
+    let sink = Sink::start(&env("NYX_MAIL_TEST_CERT"), &env("NYX_MAIL_TEST_KEY")).await;
     let mut local = Local::new(user);
     local.sync().await.unwrap();
 

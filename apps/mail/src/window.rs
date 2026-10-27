@@ -4,7 +4,7 @@
 //! user collapses it.
 //!
 //! Everything shown is read from `mail.sqlite`; every change is a call to
-//! nixe-maild, whose `Changed` signal brings the window up to date.
+//! nyx-maild, whose `Changed` signal brings the window up to date.
 
 use crate::compose::{self, Start};
 use crate::data::{self, View};
@@ -18,11 +18,11 @@ use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use nixe_mail_core::db::{ListItem, Mailbox, Role, Scheduled, SenderRow};
-use nixe_mail_core::flags;
-use nixe_mail_core::organize::Kind;
-use nixe_mail_core::send::Draft;
-use nixe_ui::chrome;
+use nyx_mail_core::db::{ListItem, Mailbox, Role, Scheduled, SenderRow};
+use nyx_mail_core::flags;
+use nyx_mail_core::organize::Kind;
+use nyx_mail_core::send::Draft;
+use nyx_ui::chrome;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -165,7 +165,7 @@ pub fn present(app: &gtk::Application, section: Option<&str>) {
     let first = ui().is_none();
     if first {
         build(app);
-        let start = nixe_theme::start_page("inbox", &prefs::get().last_section);
+        let start = nyx_theme::start_page("inbox", &prefs::get().last_section);
         show_view(View::from_id(&start));
         start_engine();
     }
@@ -444,7 +444,7 @@ fn role_icon(role: Option<Role>) -> &'static str {
         Some(Role::Drafts) => "document-edit-symbolic",
         Some(Role::Trash) => "user-trash-symbolic",
         Some(Role::Junk) => "mail-mark-junk-symbolic",
-        Some(Role::Archive) => "nixe-mail-archive-symbolic",
+        Some(Role::Archive) => "nyx-mail-archive-symbolic",
         Some(Role::Flagged) => "starred-symbolic",
         _ => "folder-symbolic",
     }
@@ -633,7 +633,7 @@ fn list_row(row: &Row) -> gtk::Box {
         ),
         Row::Draft { draft, updated, .. } => (
             {
-                let to = nixe_mail_core::send::people_text(&draft.to);
+                let to = nyx_mail_core::send::people_text(&draft.to);
                 if to.is_empty() { "No recipients".to_string() } else { format!("To {to}") }
             },
             when_text(*updated, false),
@@ -1115,11 +1115,11 @@ fn forget_account(id: &str, address: &str) {
 }
 
 pub fn open_online_accounts() {
-    let settings = nixe_accounts::find_bin("nixe-settings");
+    let settings = nyx_accounts::find_bin("nyx-settings");
     let started =
         settings.is_some_and(|bin| std::process::Command::new(bin).args(["--section", "online-accounts"]).spawn().is_ok());
-    if !started && nixe_accounts::open_management().is_err() {
-        toast("Install Nixe Settings or gnome-online-accounts-gtk to add accounts.");
+    if !started && nyx_accounts::open_management().is_err() {
+        toast("Install Nyx Settings or gnome-online-accounts-gtk to add accounts.");
     }
 }
 
@@ -1175,7 +1175,7 @@ fn group_label(text: &str, first: bool, add: bool) -> gtk::Widget {
 
 /// An account's heading: click (or the chevron) folds its folders away;
 /// right-click for the account's menu.
-fn account_header(account: &nixe_mail_core::AccountRow, first_account: bool, folded: bool) -> gtk::Widget {
+fn account_header(account: &nyx_mail_core::AccountRow, first_account: bool, folded: bool) -> gtk::Widget {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     row.add_css_class("compact-hide");
     row.add_css_class("account-header");
@@ -1356,12 +1356,12 @@ pub(crate) fn rebuild_nav() {
 // ---------- Building ----------
 
 fn install_icons() {
-    let dir = nixe_core::paths::cache_dir().join("icons");
-    let name = "nixe-mail-archive-symbolic.svg";
-    let svg = include_str!("../data/nixe-mail-archive-symbolic.svg");
+    let dir = nyx_core::paths::cache_dir().join("icons");
+    let name = "nyx-mail-archive-symbolic.svg";
+    let svg = include_str!("../data/nyx-mail-archive-symbolic.svg");
     let path = dir.join(name);
     if std::fs::read_to_string(&path).ok().as_deref() != Some(svg) {
-        let _ = nixe_core::cmd::atomic_write(&path, svg);
+        let _ = nyx_core::cmd::atomic_write(&path, svg);
     }
     if let Some(display) = gdk::Display::default() {
         gtk::IconTheme::for_display(&display).add_search_path(dir);
@@ -1373,10 +1373,10 @@ fn build(app: &gtk::Application) {
     let window = gtk::ApplicationWindow::builder().application(app).title("Mail").default_width(1120).default_height(800).build();
     window.add_css_class("mail-window");
     window.set_titlebar(Some(&gtk::Box::new(gtk::Orientation::Horizontal, 0)));
-    window.set_icon_name(Some("io.github.design_nexus.nixe.Mail"));
-    nixe_ui::keys::install(
+    window.set_icon_name(Some("io.github.design_nexus.nyx.Mail"));
+    nyx_ui::keys::install(
         &window,
-        nixe_ui::keys::Common {
+        nyx_ui::keys::Common {
             settings: Some(settings_dialog::open),
             shortcuts: Some(show_shortcuts),
             close: true,
@@ -1519,7 +1519,7 @@ fn build(app: &gtk::Application) {
         ("mail-reply-sender-symbolic", "Reply (R)", || reply(false)),
         ("mail-reply-all-symbolic", "Reply to all (A)", || reply(true)),
         ("mail-forward-symbolic", "Forward (F)", forward),
-        ("nixe-mail-archive-symbolic", "Archive (E)", archive),
+        ("nyx-mail-archive-symbolic", "Archive (E)", archive),
         ("mail-mark-junk-symbolic", "Junk or not junk (!)", junk),
         ("user-trash-symbolic", "Move to Trash (#)", trash),
         ("mail-unread-symbolic", "Mark read or unread (U)", toggle_unread),
@@ -1855,7 +1855,7 @@ pub fn toast_undo(message: &str, undo: impl Fn() + 'static) {
 
 fn show_toast(message: &str, undo: Option<Box<dyn Fn()>>) {
     let Some(ui) = ui() else {
-        eprintln!("nixe-mail: {message}");
+        eprintln!("nyx-mail: {message}");
         return;
     };
     let overlay = ui.borrow().overlay.clone();

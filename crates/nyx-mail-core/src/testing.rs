@@ -19,7 +19,7 @@ pub struct Dovecot {
 
 impl Dovecot {
     pub fn from_env() -> Self {
-        Self { port: env("NIXE_MAIL_TEST_IMAPS").parse().expect("a port") }
+        Self { port: env("NYX_MAIL_TEST_IMAPS").parse().expect("a port") }
     }
 
     pub fn server(&self, user: &str) -> Server {

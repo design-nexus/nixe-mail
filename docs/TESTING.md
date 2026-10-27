@@ -14,10 +14,10 @@ Never against a real mailbox during development.
 
 `tools/test-imap.sh` starts a throwaway Dovecot (IMAP over TLS with a test CA,
 CONDSTORE, QRESYNC, MOVE, IDLE, SPECIAL-USE) as the current user in a scratch
-directory; the tests run an SMTP sink themselves (`nixe-mail-core`'s `testing`
+directory; the tests run an SMTP sink themselves (`nyx-mail-core`'s `testing`
 feature). Each test signs in as its own user, so each starts with an empty store.
 
-`nixe-mail-core` (`tests/imap.rs`):
+`nyx-mail-core` (`tests/imap.rs`):
 
 - first sync, new mail, nothing changed → nothing fetched
 - another client's flag changes and expunges
@@ -29,7 +29,7 @@ feature). Each test signs in as its own user, so each starts with an empty store
 - sending (recipients include Bcc, the message doesn't), the copy appended to Sent
 - account removal freeing its stored files and keeping the server's mail
 
-`nixe-mail-core` (`tests/graph.rs`, no Dovecot needed) runs against the fake Graph server
+`nyx-mail-core` (`tests/graph.rs`, no Dovecot needed) runs against the fake Graph server
 in `fake_graph` (the `testing` feature; token `secret`):
 
 - folders, children and roles; Outlook's own folders left out; recent bodies fetched
@@ -38,10 +38,10 @@ in `fake_graph` (the `testing` feature; token `secret`):
 - the first sync keeping the newest window; an expired delta link starting over
 - a refused token is a sign-in error; sending keeps Bcc and leaves the Sent copy to Outlook
 
-`nixe-maild` (`tests/session.rs`) also runs a Microsoft 365 account against it: sync,
+`nyx-maild` (`tests/session.rs`) also runs a Microsoft 365 account against it: sync,
 polling, flag and archive, and sending.
 
-`nixe-maild` (`tests/session.rs`), on a private session bus with scratch XDG
+`nyx-maild` (`tests/session.rs`), on a private session bus with scratch XDG
 directories, playing the notification server: first sync, IDLE noticing new mail
 and a notification for it, none while the window is active, flags and archive
 reaching the server, a send going out exactly once with its copy in Sent, and

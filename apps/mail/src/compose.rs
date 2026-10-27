@@ -11,10 +11,10 @@ use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use nixe_mail_core::db::MessageRow;
-use nixe_mail_core::flags;
-use nixe_mail_core::mime::{self, Person};
-use nixe_mail_core::send::{self, Draft, FileAttachment};
+use nyx_mail_core::db::MessageRow;
+use nyx_mail_core::flags;
+use nyx_mail_core::mime::{self, Person};
+use nyx_mail_core::send::{self, Draft, FileAttachment};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -246,7 +246,7 @@ fn build(draft: Draft, draft_id: Option<i64>, answering: Option<i64>, title: &st
     window.add_css_class("mail-window");
     window.add_css_class("compose-window");
     window.set_titlebar(Some(&gtk::Box::new(gtk::Orientation::Horizontal, 0)));
-    window.set_icon_name(Some("io.github.design_nexus.nixe.Mail"));
+    window.set_icon_name(Some("io.github.design_nexus.nyx.Mail"));
     if let Some(app) = window::window().and_then(|w| w.application()) {
         window.set_application(Some(&app));
     }

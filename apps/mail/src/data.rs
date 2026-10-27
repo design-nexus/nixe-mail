@@ -1,11 +1,11 @@
-//! What the window reads: `mail.sqlite` (read-only; nixe-maild writes it) and
+//! What the window reads: `mail.sqlite` (read-only; nyx-maild writes it) and
 //! the message store.
 
-use nixe_mail_core::db::{AccountRow, Db, FollowUp, ListItem, Mailbox, MessageRow, Role, Scheduled, SenderRow};
-use nixe_mail_core::mime::{self, Parsed};
-use nixe_mail_core::organize::{Filter, Kind, Screen};
-use nixe_mail_core::store::Store;
-use nixe_mail_core::{Paths, rusqlite};
+use nyx_mail_core::db::{AccountRow, Db, FollowUp, ListItem, Mailbox, MessageRow, Role, Scheduled, SenderRow};
+use nyx_mail_core::mime::{self, Parsed};
+use nyx_mail_core::organize::{Filter, Kind, Screen};
+use nyx_mail_core::store::Store;
+use nyx_mail_core::{Paths, rusqlite};
 use std::cell::RefCell;
 
 thread_local! {
@@ -13,7 +13,7 @@ thread_local! {
 }
 
 pub fn paths() -> Paths {
-    Paths::new(nixe_core::paths::data_dir())
+    Paths::new(nyx_core::paths::data_dir())
 }
 
 /// Runs `f` with the database, opening it on first use (it appears once the
@@ -29,7 +29,7 @@ fn with<T: Default>(f: impl FnOnce(&Db) -> rusqlite::Result<T>) -> T {
         let borrowed = slot.borrow();
         let Some(db) = borrowed.as_ref() else { return T::default() };
         f(db).unwrap_or_else(|e| {
-            eprintln!("nixe-mail: reading mail: {e}");
+            eprintln!("nyx-mail: reading mail: {e}");
             T::default()
         })
     })
@@ -242,7 +242,7 @@ pub fn drafts() -> Vec<(i64, String, serde_json::Value, i64)> {
 }
 
 /// People from the user's mail to suggest as recipients.
-pub fn people(query: &str, limit: usize) -> Vec<nixe_mail_core::mime::Person> {
+pub fn people(query: &str, limit: usize) -> Vec<nyx_mail_core::mime::Person> {
     with(|db| db.people(query, limit))
 }
 

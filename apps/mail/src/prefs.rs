@@ -1,6 +1,6 @@
-//! This app's own preferences (`~/.config/nixe-mail/settings.toml`).
+//! This app's own preferences (`~/.config/nyx-mail/settings.toml`).
 
-pub use nixe_theme::ThemeMode;
+pub use nyx_theme::ThemeMode;
 
 use serde::{Deserialize, Serialize};
 
@@ -92,4 +92,4 @@ pub fn pin_key(account: &str, name: &str) -> String {
     format!("{account}\u{1f}{name}")
 }
 
-nixe_core::prefs_store!(Prefs);
+nyx_core::prefs_store!(Prefs);

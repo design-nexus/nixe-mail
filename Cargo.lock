@@ -736,7 +736,7 @@ dependencies = [
 [[package]]
 name = "glimpse-plugin-sdk"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-glimpse.git?rev=e60055b3b10793646b07bcb8b403ef1c67cdfd01#e60055b3b10793646b07bcb8b403ef1c67cdfd01"
+source = "git+https://github.com/design-nexus/nyx-glimpse.git?rev=6f9f7325259bb05c2bc6a5eb1920ce6caed7aa82#6f9f7325259bb05c2bc6a5eb1920ce6caed7aa82"
 dependencies = [
  "anyhow",
  "serde",
@@ -1393,9 +1393,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
-name = "nixe-accounts"
+name = "nom"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
+name = "num-traits"
+version = "0.2.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
+name = "nyx-accounts"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-core.git?rev=87682e6c936b6a4f006639b1a1c099e96346c07c#87682e6c936b6a4f006639b1a1c099e96346c07c"
+source = "git+https://github.com/design-nexus/nyx-core.git?rev=52cba5e27a3dd5f00c780f53e423302b4b5f9c9c#52cba5e27a3dd5f00c780f53e423302b4b5f9c9c"
 dependencies = [
  "anyhow",
  "gio",
@@ -1405,9 +1423,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "nixe-core"
+name = "nyx-core"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-core.git?rev=87682e6c936b6a4f006639b1a1c099e96346c07c#87682e6c936b6a4f006639b1a1c099e96346c07c"
+source = "git+https://github.com/design-nexus/nyx-core.git?rev=52cba5e27a3dd5f00c780f53e423302b4b5f9c9c#52cba5e27a3dd5f00c780f53e423302b4b5f9c9c"
 dependencies = [
  "anyhow",
  "gtk4",
@@ -1417,24 +1435,24 @@ dependencies = [
 ]
 
 [[package]]
-name = "nixe-mail"
+name = "nyx-mail"
 version = "0.1.1"
 dependencies = [
  "chrono",
  "glib",
  "gtk4",
- "nixe-accounts",
- "nixe-core",
- "nixe-mail-core",
- "nixe-theme",
- "nixe-ui",
+ "nyx-accounts",
+ "nyx-core",
+ "nyx-mail-core",
+ "nyx-theme",
+ "nyx-ui",
  "serde",
  "serde_json",
  "webkit6",
 ]
 
 [[package]]
-name = "nixe-mail-core"
+name = "nyx-mail-core"
 version = "0.1.1"
 dependencies = [
  "ammonia",
@@ -1458,67 +1476,49 @@ dependencies = [
 ]
 
 [[package]]
-name = "nixe-mail-glimpse"
+name = "nyx-mail-glimpse"
 version = "0.1.1"
 dependencies = [
  "anyhow",
  "glimpse-plugin-sdk",
- "nixe-mail-core",
+ "nyx-mail-core",
  "serde_json",
 ]
 
 [[package]]
-name = "nixe-maild"
+name = "nyx-maild"
 version = "0.1.1"
 dependencies = [
  "futures",
  "gio",
  "glib",
- "nixe-accounts",
- "nixe-core",
- "nixe-mail-core",
+ "nyx-accounts",
+ "nyx-core",
+ "nyx-mail-core",
  "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
-name = "nixe-theme"
+name = "nyx-theme"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-design.git?rev=b8204de80644e263e32783602f2e0ae393578c9e#b8204de80644e263e32783602f2e0ae393578c9e"
+source = "git+https://github.com/design-nexus/nyx-design.git?rev=938c638951a53f5874a8276d07ac9dcd68b191ad#938c638951a53f5874a8276d07ac9dcd68b191ad"
 dependencies = [
  "gtk4",
- "nixe-core",
+ "nyx-core",
  "serde",
  "toml",
 ]
 
 [[package]]
-name = "nixe-ui"
+name = "nyx-ui"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nixe-design.git?rev=b8204de80644e263e32783602f2e0ae393578c9e#b8204de80644e263e32783602f2e0ae393578c9e"
+source = "git+https://github.com/design-nexus/nyx-design.git?rev=938c638951a53f5874a8276d07ac9dcd68b191ad#938c638951a53f5874a8276d07ac9dcd68b191ad"
 dependencies = [
  "gtk4",
- "nixe-core",
- "nixe-theme",
-]
-
-[[package]]
-name = "nom"
-version = "8.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df9761775871bdef83bee530e60050f7e54b1105350d6884eb0fb4f46c2f9405"
-dependencies = [
- "memchr",
-]
-
-[[package]]
-name = "num-traits"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
-dependencies = [
- "autocfg",
+ "nyx-core",
+ "nyx-theme",
 ]
 
 [[package]]

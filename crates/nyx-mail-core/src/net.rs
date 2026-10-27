@@ -87,13 +87,13 @@ impl From<async_imap::error::Error> for NetError {
 }
 
 /// TLS settings: the system's trusted certificates, plus an extra CA file when
-/// `NIXE_MAIL_EXTRA_CA` names one (tests and self-hosted servers).
+/// `NYX_MAIL_EXTRA_CA` names one (tests and self-hosted servers).
 pub fn tls_config() -> Arc<rustls::ClientConfig> {
     let mut roots = rustls::RootCertStore::empty();
     for cert in rustls_native_certs::load_native_certs().certs {
         let _ = roots.add(cert);
     }
-    if let Some(path) = std::env::var_os("NIXE_MAIL_EXTRA_CA")
+    if let Some(path) = std::env::var_os("NYX_MAIL_EXTRA_CA")
         && let Ok(pem) = std::fs::read(&path)
     {
         use rustls_pki_types::pem::PemObject;

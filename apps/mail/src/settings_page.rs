@@ -18,7 +18,7 @@ pub fn build(page: &Page) {
 
 fn window_group(page: &Page) {
     let group = page.group("Mail window");
-    group.add(&nixe_ui::widgets::start_row());
+    group.add(&nyx_ui::widgets::start_row());
     let prefs = prefs::get();
     let options: Vec<(String, String)> = theme::all().iter().map(|t| (t.id.clone(), t.name.clone())).collect();
     let (theme_row, theme_dd) =

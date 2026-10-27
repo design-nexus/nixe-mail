@@ -49,7 +49,7 @@ impl Graph {
     /// `base` is `GRAPH`, or a test server.
     pub fn new(base: &str, token: String) -> Result<Self, NetError> {
         let http = reqwest::Client::builder()
-            .user_agent("nixe-mail")
+            .user_agent("nyx-mail")
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| NetError::Protocol(e.to_string()))?;

@@ -2,7 +2,7 @@
 
 Mail for Omarchy: your Google, Microsoft 365, Outlook.com, Fastmail, iCloud and other mail accounts in one inbox,
 readable offline and driven from the keyboard. Part of the
-[Nixe](https://github.com/design-nexus/nixe) apps.
+[Nyx](https://github.com/design-nexus/nyx) apps.
 
 - Every account's Inbox, Drafts, Sent, Archive, Junk and Trash together, then each account's folders and labels
 - Conversations, search across all of your mail, and new-mail notifications
@@ -17,13 +17,13 @@ readable offline and driven from the keyboard. Part of the
 
 Accounts are added in **Settings → Online Accounts** with Mail switched on. Mail never
 stores passwords or sign-ins; they stay there. Your messages are kept on this computer in
-`~/.local/share/nixe-mail/`. Sorting, snoozes and scheduled sends happen on this
+`~/.local/share/nyx-mail/`. Sorting, snoozes and scheduled sends happen on this
 computer, so it has to be on for a scheduled message to go out.
 
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/design-nexus/nixe-mail/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/design-nexus/nyx-mail/main/install.sh | bash
 ```
 
 ## Keys

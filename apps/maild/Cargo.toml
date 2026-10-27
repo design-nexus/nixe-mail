@@ -1,27 +1,27 @@
 [package]
-name = "nixe-maild"
+name = "nyx-maild"
 version = "0.1.1"
-description = "Nixe Mail's engine: sync, sending and the offline queue, in the background"
+description = "Nyx Mail's engine: sync, sending and the offline queue, in the background"
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "nixe-maild"
+name = "nyx-maild"
 path = "src/main.rs"
 
 [dependencies]
 futures = "0.3"
 gio = "0.22"
 glib = "0.22"
-nixe-accounts = { git = "https://github.com/design-nexus/nixe-core.git", rev = "87682e6c936b6a4f006639b1a1c099e96346c07c", features = ["credentials"] }
-nixe-core = { git = "https://github.com/design-nexus/nixe-core.git", rev = "87682e6c936b6a4f006639b1a1c099e96346c07c", default-features = false }
-nixe-mail-core = { path = "../../crates/nixe-mail-core" }
+nyx-accounts = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c", features = ["credentials"] }
+nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c", default-features = false }
+nyx-mail-core = { path = "../../crates/nyx-mail-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
 
 [dev-dependencies]
-nixe-mail-core = { path = "../../crates/nixe-mail-core", features = ["testing"] }
+nyx-mail-core = { path = "../../crates/nyx-mail-core", features = ["testing"] }
 tokio = { version = "1", features = ["rt-multi-thread", "net", "time"] }

@@ -1,8 +1,8 @@
-//! Mail store, MIME, search and sync for Nixe Mail. No GTK.
+//! Mail store, MIME, search and sync for Nyx Mail. No GTK.
 //!
 //! `mail.sqlite` holds mailboxes, message envelopes, flags, threads, the
 //! offline change queue and a full-text index; raw messages are files in the
-//! store. `nixe-maild` is the only writer; the window reads.
+//! store. `nyx-maild` is the only writer; the window reads.
 
 pub mod db;
 #[cfg(feature = "testing")]
@@ -56,7 +56,7 @@ pub mod flags {
     }
 }
 
-/// Where Mail keeps things, under a data directory (`~/.local/share/nixe-mail`).
+/// Where Mail keeps things, under a data directory (`~/.local/share/nyx-mail`).
 pub struct Paths {
     pub root: std::path::PathBuf,
 }

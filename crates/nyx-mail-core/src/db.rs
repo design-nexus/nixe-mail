@@ -1,5 +1,5 @@
 //! `mail.sqlite`: accounts, mailboxes, messages, attachments, the offline
-//! change queue and a full-text index. WAL; `nixe-maild` writes, the window
+//! change queue and a full-text index. WAL; `nyx-maild` writes, the window
 //! opens it read-only.
 
 use crate::mime::Parsed;

@@ -1,5 +1,5 @@
-//! "Add to Reminders": a reminder about a conversation, made through Nixe
-//! Reminders' control interface (`reminders.create`) with a `nixe-mail:` link
+//! "Add to Reminders": a reminder about a conversation, made through Nyx
+//! Reminders' control interface (`reminders.create`) with a `nyx-mail:` link
 //! back to the message, which Reminders' "From" button opens. Reminders is
 //! started when it isn't running: its interface is on its primary instance, and
 //! takes reminders once the task lists have loaded.
@@ -10,20 +10,20 @@ use gtk::prelude::*;
 use gtk::{gio, glib};
 use serde_json::{Value, json};
 
-const NAME: &str = "io.github.design_nexus.nixe.Reminders";
-const PATH: &str = "/io/github/design_nexus/nixe/Reminders";
-const INTERFACE: &str = "io.github.design_nexus.nixe.Control";
+const NAME: &str = "io.github.design_nexus.nyx.Reminders";
+const PATH: &str = "/io/github/design_nexus/nyx/Reminders";
+const INTERFACE: &str = "io.github.design_nexus.nyx.Control";
 /// Retries while a started Reminders loads (every 500 ms, up to 15 s).
 const TRIES: u32 = 30;
 
 /// The link a reminder keeps back to a message.
 pub fn link(id: i64) -> String {
-    format!("nixe-mail:message/{id}")
+    format!("nyx-mail:message/{id}")
 }
 
-/// The message a `nixe-mail:` link names.
+/// The message a `nyx-mail:` link names.
 pub fn message_of(link: &str) -> Option<i64> {
-    link.strip_prefix("nixe-mail:")?.trim_start_matches('/').strip_prefix("message/")?.parse().ok()
+    link.strip_prefix("nyx-mail:")?.trim_start_matches('/').strip_prefix("message/")?.parse().ok()
 }
 
 /// When a reminder can be due: (label, due as Reminders reads it). A date
@@ -99,8 +99,8 @@ fn call(tool: &str, args: &Value, done: impl FnOnce(Result<Value, Fail>) + 'stat
 
 /// Starts Reminders (it opens its window); false when it isn't installed.
 fn start() -> bool {
-    let local = glib::home_dir().join(".local/bin/nixe-reminders");
-    for program in [std::path::PathBuf::from("nixe-reminders"), local] {
+    let local = glib::home_dir().join(".local/bin/nyx-reminders");
+    for program in [std::path::PathBuf::from("nyx-reminders"), local] {
         if let Ok(mut child) = std::process::Command::new(&program).spawn() {
             std::thread::spawn(move || child.wait());
             return true;
@@ -155,8 +155,8 @@ mod tests {
     #[test]
     fn links_round_trip() {
         assert_eq!(message_of(&link(42)), Some(42));
-        assert_eq!(message_of("nixe-mail://message/7"), Some(7));
-        assert_eq!(message_of("nixe-mail:thread/7"), None);
+        assert_eq!(message_of("nyx-mail://message/7"), Some(7));
+        assert_eq!(message_of("nyx-mail:thread/7"), None);
         assert_eq!(message_of("mailto:a@b"), None);
     }
 

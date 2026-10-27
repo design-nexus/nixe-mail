@@ -1,17 +1,17 @@
-//! Talking to nixe-maild over `io.github.design_nexus.nixe.MailEngine1`. Every
+//! Talking to nyx-maild over `io.github.design_nexus.nyx.MailEngine1`. Every
 //! change goes through the engine (it is the only writer of `mail.sqlite`);
 //! the window reads the database itself.
 
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use nixe_mail_core::send::Draft;
+use nyx_mail_core::send::Draft;
 use serde::Deserialize;
 use std::cell::RefCell;
 
-const NAME: &str = "io.github.design_nexus.nixe.MailEngine";
-const PATH: &str = "/io/github/design_nexus/nixe/MailEngine";
-const INTERFACE: &str = "io.github.design_nexus.nixe.MailEngine1";
+const NAME: &str = "io.github.design_nexus.nyx.MailEngine";
+const PATH: &str = "/io/github/design_nexus/nyx/MailEngine";
+const INTERFACE: &str = "io.github.design_nexus.nyx.MailEngine1";
 
 /// What the engine reports (`Status()`).
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -60,17 +60,17 @@ fn conn() -> Option<gio::DBusConnection> {
 /// Starts the engine if it isn't running: its user service when installed,
 /// else the program next to this one or on PATH.
 pub fn ensure_running() {
-    let unit = nixe_core::paths::config_home().join("systemd/user/nixe-maild.service");
+    let unit = nyx_core::paths::config_home().join("systemd/user/nyx-maild.service");
     if unit.exists() {
         let _ = std::process::Command::new("systemctl")
-            .args(["--user", "start", "--no-block", "nixe-maild.service"])
+            .args(["--user", "start", "--no-block", "nyx-maild.service"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn();
         return;
     }
-    let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("nixe-maild"))).filter(|p| p.exists());
-    let program = beside.unwrap_or_else(|| "nixe-maild".into());
+    let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("nyx-maild"))).filter(|p| p.exists());
+    let program = beside.unwrap_or_else(|| "nyx-maild".into());
     let _ = std::process::Command::new(program).stdout(std::process::Stdio::null()).spawn();
 }
 

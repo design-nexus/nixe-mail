@@ -1,6 +1,6 @@
 //! Recipient suggestions under the To, Cc and Bcc fields: people from the
-//! user's mail (`Db::people`) at once, then Nixe Contacts' matches
-//! (`nixe-contacts --find`, which reads its address book without a window).
+//! user's mail (`Db::people`) at once, then Nyx Contacts' matches
+//! (`nyx-contacts --find`, which reads its address book without a window).
 
 use crate::data;
 use crate::widgets;
@@ -8,8 +8,8 @@ use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use nixe_mail_core::mime::Person;
-use nixe_mail_core::send;
+use nyx_mail_core::mime::Person;
+use nyx_mail_core::send;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -116,7 +116,7 @@ fn changed(s: &Rc<State>) {
     }
     let from_mail = data::people(&word, SHOWN);
     show(s, from_mail.clone());
-    let Some(program) = glib::find_program_in_path("nixe-contacts") else { return };
+    let Some(program) = glib::find_program_in_path("nyx-contacts") else { return };
     let s2 = s.clone();
     // A moment's pause, so a fast typist doesn't start a lookup per letter.
     glib::timeout_add_local_once(std::time::Duration::from_millis(180), move || {

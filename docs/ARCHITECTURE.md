@@ -2,11 +2,11 @@
 
 ```mermaid
 flowchart LR
-  UI[nixe-mail] -->|MailEngine1| Maild[nixe-maild]
+  UI[nyx-mail] -->|MailEngine1| Maild[nyx-maild]
   UI -.read only.-> Db[(mail.sqlite)]
   Maild --> Db
   Maild --> Store[(store/*.eml)]
-  Maild --> Acc[nixe-accounts credentials]
+  Maild --> Acc[nyx-accounts credentials]
   Acc -->|in-process| GOA[goa-daemon]
   Maild -->|IMAP / SMTP over TLS| Servers[(Servers)]
   Maild -->|Microsoft Graph, HTTPS| M365[(Microsoft 365)]
@@ -17,11 +17,11 @@ flowchart LR
 
 ## Processes
 
-- **`nixe-maild`** is GTK-free, runs as a systemd user unit (the `nixe-passwordsd`
+- **`nyx-maild`** is GTK-free, runs as a systemd user unit (the `nyx-passwordsd`
   shape), and is the only writer of `mail.sqlite` and `store/`. It syncs, runs the ops
   queue, schedules snooze, send later and follow-ups, and sends notifications.
-- **`nixe-mail`** is the window. It reads `mail.sqlite` read-only and asks the
-  daemon to change anything over `io.github.design_nexus.nixe.MailEngine1`. If the
+- **`nyx-mail`** is the window. It reads `mail.sqlite` read-only and asks the
+  daemon to change anything over `io.github.design_nexus.nyx.MailEngine1`. If the
   daemon is down, cached mail stays readable and changes wait.
 
 ## Engine
@@ -34,8 +34,8 @@ flowchart LR
 | MIME | `mail-parser`, `mail-builder` |
 | HTML sanitizing | `ammonia` |
 | Storage | `rusqlite` (bundled, FTS5) |
-| Credentials | `nixe-accounts` (`credentials` feature) |
-| Backoff | `nixe-sync::backoff` |
+| Credentials | `nyx-accounts` (`credentials` feature) |
+| Backoff | `nyx-sync::backoff` |
 
 TLS is required. Server settings come from the GOA `Mail` interface; XOAUTH2 when GOA
 says so, otherwise the account password from GOA. Credentials are fetched for each
@@ -82,7 +82,7 @@ receipt patterns; user rules win over both.
 
 WebKitGTK 6, used for message bodies only:
 
-- HTML is sanitized with `ammonia`, then served from a custom `nixe-mail-msg:` scheme.
+- HTML is sanitized with `ammonia`, then served from a custom `nyx-mail-msg:` scheme.
 - JavaScript, plugins, navigation and every http/https load are off. Images load only
   when allowed for that sender or message. `cid:` parts come from the store.
 - Links open in the system browser after showing the real target.

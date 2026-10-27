@@ -19,25 +19,25 @@ mod window;
 use gtk::prelude::*;
 use gtk::{gio, glib};
 
-pub const APP_ID: &str = "io.github.design_nexus.nixe.Mail";
+pub const APP_ID: &str = "io.github.design_nexus.nyx.Mail";
 
-const USAGE: &str = "Usage: nixe-mail [OPTIONS] [mailto:…]\n\
+const USAGE: &str = "Usage: nyx-mail [OPTIONS] [mailto:…]\n\
 \n\
   mailto:ADDRESS  write a message (from a mailto: link)\n\
   --compose       write a new message\n\
-  --message ID    show a message's conversation (or a nixe-mail:message/ID link)\n\
+  --message ID    show a message's conversation (or a nyx-mail:message/ID link)\n\
   --section ID    open inbox, drafts, sent, archive, junk, trash, mailbox:ID or settings\n\
   --toggle        close the window if it's open, otherwise open it\n\
   --describe      print the control tools (JSON) and exit\n";
 
 fn main() -> glib::ExitCode {
-    nixe_core::app::init(nixe_core::app::App { slug: "nixe-mail", name: "Mail" });
+    nyx_core::app::init(nyx_core::app::App { slug: "nyx-mail", name: "Mail" });
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--help" || a == "-h") {
         print!("{USAGE}");
         return glib::ExitCode::SUCCESS;
     }
-    // The control tools as JSON, without a window (Nixe Assistant's abilities).
+    // The control tools as JSON, without a window (Nyx Assistant's abilities).
     if args.iter().any(|a| a == "--describe") {
         println!("{}", control::tools());
         return glib::ExitCode::SUCCESS;
@@ -49,8 +49,8 @@ fn main() -> glib::ExitCode {
     let app = gtk::Application::builder().application_id(APP_ID).flags(gio::ApplicationFlags::HANDLES_COMMAND_LINE).build();
     app.connect_startup(|app| {
         theme::install();
-        // Nixe Assistant searches, reads and starts messages through this.
-        nixe_core::control::serve_async(app, control::tools(), control::handle);
+        // Nyx Assistant searches, reads and starts messages through this.
+        nyx_core::control::serve_async(app, control::tools(), control::handle);
     });
     app.connect_command_line(|app, cl| {
         let argv: Vec<String> = cl.arguments().iter().map(|a| a.to_string_lossy().to_string()).collect();
@@ -64,7 +64,7 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::SUCCESS;
         }
         window::present(app, value("--section").as_deref());
-        // A nixe-mail: link (a reminder's "From") names a message too.
+        // A nyx-mail: link (a reminder's "From") names a message too.
         let linked = argv.iter().skip(1).find_map(|a| reminders::message_of(a));
         if let Some(id) = value("--message").and_then(|v| v.parse::<i64>().ok()).or(linked)
             && !window::open_message(id)

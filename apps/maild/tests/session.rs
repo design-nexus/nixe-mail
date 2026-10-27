@@ -1,15 +1,15 @@
-//! nixe-maild end to end, on a private session bus with scratch XDG
+//! nyx-maild end to end, on a private session bus with scratch XDG
 //! directories, against the test Dovecot and an SMTP sink (run through
 //! tools/test-imap.sh). This test plays the desktop's notification server and
 //! the window: it calls MailEngine1 and reads mail.sqlite.
 
 use gio::prelude::*;
-use nixe_mail_core::fake_graph::FakeGraph;
-use nixe_mail_core::flags::FLAGGED;
-use nixe_mail_core::mime::Person;
-use nixe_mail_core::send::Draft;
-use nixe_mail_core::testing::{Dovecot, Sink, env, message};
-use nixe_mail_core::{Db, Role};
+use nyx_mail_core::fake_graph::FakeGraph;
+use nyx_mail_core::flags::FLAGGED;
+use nyx_mail_core::mime::Person;
+use nyx_mail_core::send::Draft;
+use nyx_mail_core::testing::{Dovecot, Sink, env, message};
+use nyx_mail_core::{Db, Role};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -39,9 +39,9 @@ fn pump(seconds: u64, mut done: impl FnMut() -> bool) -> bool {
 
 fn call(conn: &gio::DBusConnection, method: &str, args: Option<glib::Variant>) -> Result<glib::Variant, glib::Error> {
     conn.call_sync(
-        Some("io.github.design_nexus.nixe.MailEngine"),
-        "/io/github/design_nexus/nixe/MailEngine",
-        "io.github.design_nexus.nixe.MailEngine1",
+        Some("io.github.design_nexus.nyx.MailEngine"),
+        "/io/github/design_nexus/nyx/MailEngine",
+        "io.github.design_nexus.nyx.MailEngine1",
         method,
         args.as_ref(),
         None,
@@ -65,7 +65,7 @@ fn db() -> Db {
 }
 
 fn db_in(data: &std::path::Path) -> Db {
-    Db::open_read_only(&data.join("nixe-mail/mail.sqlite")).unwrap()
+    Db::open_read_only(&data.join("nyx-mail/mail.sqlite")).unwrap()
 }
 
 fn message_id(subject: &str) -> Option<i64> {
@@ -91,7 +91,7 @@ impl Drop for Killed {
 fn syncs_pushes_new_mail_sends_and_saves_changes() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     let dovecot = Dovecot::from_env();
-    let sink = rt.block_on(Sink::start(&env("NIXE_MAIL_TEST_CERT"), &env("NIXE_MAIL_TEST_KEY")));
+    let sink = rt.block_on(Sink::start(&env("NYX_MAIL_TEST_CERT"), &env("NYX_MAIL_TEST_KEY")));
     rt.block_on(dovecot.deliver(USER, "INBOX", "Welcome", "Hello there"));
 
     let conn = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE).unwrap();
@@ -119,7 +119,7 @@ fn syncs_pushes_new_mail_sends_and_saves_changes() {
         |_, _| {},
     );
 
-    let accounts = std::path::PathBuf::from(env("NIXE_MAIL_TEST_DIR")).join("accounts.json");
+    let accounts = std::path::PathBuf::from(env("NYX_MAIL_TEST_DIR")).join("accounts.json");
     let server = |port: u16| serde_json::json!({"host": "127.0.0.1", "port": port, "security": "tls", "user": USER});
     let list = serde_json::json!([{
         "id": USER, "address": "engine@example.test", "name": "Engine",
@@ -127,16 +127,16 @@ fn syncs_pushes_new_mail_sends_and_saves_changes() {
     }]);
     std::fs::write(&accounts, list.to_string()).unwrap();
     // Stands in for the Mail window: notes what it was asked to open.
-    let dir = std::path::PathBuf::from(env("NIXE_MAIL_TEST_DIR"));
+    let dir = std::path::PathBuf::from(env("NYX_MAIL_TEST_DIR"));
     let opened = dir.join("opened");
     let program = dir.join("fake-mail");
     std::fs::write(&program, format!("#!/bin/sh\necho \"$@\" > {}\n", opened.display())).unwrap();
     std::fs::set_permissions(&program, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let _maild = Killed(
-        std::process::Command::new(env!("CARGO_BIN_EXE_nixe-maild"))
-            .env("NIXE_MAIL_TEST_ACCOUNTS", &accounts)
-            .env("NIXE_MAIL_PROGRAM", &program)
-            .env("NIXE_MAIL_TICK_SECONDS", "1")
+        std::process::Command::new(env!("CARGO_BIN_EXE_nyx-maild"))
+            .env("NYX_MAIL_TEST_ACCOUNTS", &accounts)
+            .env("NYX_MAIL_PROGRAM", &program)
+            .env("NYX_MAIL_TICK_SECONDS", "1")
             .spawn()
             .unwrap(),
     );
@@ -227,7 +227,7 @@ fn syncs_pushes_new_mail_sends_and_saves_changes() {
     assert!(pump(5, || message_id("Tickets").is_none()), "still in the inbox");
     assert!(pump(15, || shown.borrow().iter().any(|(s, b)| s == "Back from snooze" && b == "Tickets")));
     assert!(pump(5, || message_id("Tickets")
-        .is_some_and(|id| db().message(id).unwrap().unwrap().flags & nixe_mail_core::flags::SEEN == 0)));
+        .is_some_and(|id| db().message(id).unwrap().unwrap().flags & nyx_mail_core::flags::SEEN == 0)));
 
     // With the Screener on, a stranger's mail arrives quietly.
     call(&conn, "SetScreener", Some((true,).to_variant())).unwrap();
@@ -252,7 +252,7 @@ fn microsoft_365_accounts_sync_change_and_send() {
     const OUTLOOK: &str = "outlook";
     let fake = FakeGraph::start();
     fake.deliver("Inbox", &message("Welcome", "Hello there"), "2026-01-01T09:00:00Z");
-    let dir = std::path::PathBuf::from(env("NIXE_MAIL_TEST_DIR")).join("graph");
+    let dir = std::path::PathBuf::from(env("NYX_MAIL_TEST_DIR")).join("graph");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let accounts = dir.join("accounts.json");
@@ -263,11 +263,11 @@ fn microsoft_365_accounts_sync_change_and_send() {
     let data = dir.join("data");
     let conn = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE).unwrap();
     let _maild = Killed(
-        std::process::Command::new(env!("CARGO_BIN_EXE_nixe-maild"))
-            .env("NIXE_MAIL_TEST_ACCOUNTS", &accounts)
+        std::process::Command::new(env!("CARGO_BIN_EXE_nyx-maild"))
+            .env("NYX_MAIL_TEST_ACCOUNTS", &accounts)
             .env("XDG_DATA_HOME", &data)
-            .env("NIXE_MAIL_TICK_SECONDS", "1")
-            .env("NIXE_MAIL_POLL_SECONDS", "1")
+            .env("NYX_MAIL_TICK_SECONDS", "1")
+            .env("NYX_MAIL_POLL_SECONDS", "1")
             .spawn()
             .unwrap(),
     );
@@ -281,7 +281,7 @@ fn microsoft_365_accounts_sync_change_and_send() {
     assert!(pump(30, || find("Tickets").is_some()), "new mail didn't come");
 
     // Flag one and archive the other: saved on the server.
-    let subject = |m: &nixe_mail_core::fake_graph::Message| nixe_mail_core::mime::parse(&m.raw).unwrap().subject;
+    let subject = |m: &nyx_mail_core::fake_graph::Message| nyx_mail_core::mime::parse(&m.raw).unwrap().subject;
     call(&conn, "SetFlags", Some((vec![find("Welcome").unwrap()], FLAGGED, 0i64).to_variant())).unwrap();
     assert!(pump(30, || fake.messages("Inbox").iter().any(|m| subject(m) == "Welcome" && m.flagged)), "not flagged there");
     call(&conn, "Move", Some((vec![find("Tickets").unwrap()], "archive").to_variant())).unwrap();

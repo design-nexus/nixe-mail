@@ -1,23 +1,23 @@
 # Mail plan
 
-Nixe Mail: read, search, write and file mail for the accounts connected in Settings →
+Nyx Mail: read, search, write and file mail for the accounts connected in Settings →
 Online Accounts, from the keyboard, offline as well as online. Shared foundation:
-[nixe-core docs/pim](https://github.com/design-nexus/nixe-core/blob/main/docs/pim/ARCHITECTURE.md).
+[nyx-core docs/pim](https://github.com/design-nexus/nyx-core/blob/main/docs/pim/ARCHITECTURE.md).
 This replaces `~/Projects/MAIL_PLAN.md`.
 
 | | |
 | --- | --- |
-| Packages | `nixe-mail` (UI), `nixe-maild` (sync engine, systemd user unit), `nixe-mail-glimpse` |
-| App id | `io.github.design_nexus.nixe.Mail` |
-| Data | `~/.local/share/nixe-mail/` (0700): `mail.sqlite` (WAL, FTS5), `store/` (raw messages) |
-| Config | `~/.config/nixe-mail/settings.toml` (never credentials) |
+| Packages | `nyx-mail` (UI), `nyx-maild` (sync engine, systemd user unit), `nyx-mail-glimpse` |
+| App id | `io.github.design_nexus.nyx.Mail` |
+| Data | `~/.local/share/nyx-mail/` (0700): `mail.sqlite` (WAL, FTS5), `store/` (raw messages) |
+| Config | `~/.config/nyx-mail/settings.toml` (never credentials) |
 | MIME | `x-scheme-handler/mailto` |
 
 ## Phases
 
 ### 1. Vertical slice (done)
-- [x] `nixe-mail-core`: schema, store, FTS5
-- [x] `nixe-maild`: IMAP sync of folders and messages against local Dovecot; GOA credentials
+- [x] `nyx-mail-core`: schema, store, FTS5
+- [x] `nyx-maild`: IMAP sync of folders and messages against local Dovecot; GOA credentials
 - [x] UI: sidebar, message list, reader (WebKitGTK 6, locked down)
 - [x] Offline reading; auth failure → banner that opens Settings
 
@@ -39,7 +39,7 @@ This replaces `~/Projects/MAIL_PLAN.md`.
 - [ ] Server-side send later when offered (SMTP FUTURERELEASE)
 - [x] Sender dashboard and bulk rules
 - [ ] Assistant: summarize, categorize, important (draft is done)
-- [ ] "Remind me" through Nixe Reminders
+- [ ] "Remind me" through Nyx Reminders
 - [x] Microsoft 365 and Outlook.com through Microsoft Graph
 - [ ] OpenPGP / S/MIME
 

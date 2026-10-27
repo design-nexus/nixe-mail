@@ -3,16 +3,16 @@ Type=Application
 Name=Mail
 GenericName=Email
 Comment=Every mail account in one inbox
-Exec=nixe-mail %u
-Icon=io.github.design_nexus.nixe.Mail
+Exec=nyx-mail %u
+Icon=io.github.design_nexus.nyx.Mail
 Terminal=false
 Categories=Network;Email;GTK;
 Keywords=mail;email;inbox;imap;smtp;
-MimeType=x-scheme-handler/mailto;x-scheme-handler/nixe-mail;
+MimeType=x-scheme-handler/mailto;x-scheme-handler/nyx-mail;
 StartupNotify=true
-StartupWMClass=io.github.design_nexus.nixe.Mail
+StartupWMClass=io.github.design_nexus.nyx.Mail
 Actions=compose;
 
 [Desktop Action compose]
 Name=New Message
-Exec=nixe-mail --compose
+Exec=nyx-mail --compose

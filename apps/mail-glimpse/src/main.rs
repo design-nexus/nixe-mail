@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result, bail};
 use glimpse_plugin_sdk::{Action, Hit, Request, serve};
-use nixe_mail_core::db::{Db, ListItem, Role};
+use nyx_mail_core::db::{Db, ListItem, Role};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -19,13 +19,13 @@ fn main() {
 }
 
 fn database() -> PathBuf {
-    if let Some(path) = std::env::var_os("NIXE_MAIL_DB") {
+    if let Some(path) = std::env::var_os("NYX_MAIL_DB") {
         return PathBuf::from(path);
     }
     let data = std::env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share")));
-    data.unwrap_or_else(|| PathBuf::from(".local/share")).join("nixe-mail/mail.sqlite")
+    data.unwrap_or_else(|| PathBuf::from(".local/share")).join("nyx-mail/mail.sqlite")
 }
 
 fn open() -> Result<Db> {
@@ -126,8 +126,8 @@ fn answer(request: &Request) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nixe_mail_core::db::NewMessage;
-    use nixe_mail_core::mime::{Parsed, Person};
+    use nyx_mail_core::db::NewMessage;
+    use nyx_mail_core::mime::{Parsed, Person};
 
     #[test]
     fn what_was_asked() {
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn search_and_preview_read_the_database() {
-        let dir = std::env::temp_dir().join(format!("nixe-mail-glimpse-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nyx-mail-glimpse-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("mail.sqlite");
         {
@@ -166,7 +166,7 @@ mod tests {
             db.recount(inbox).unwrap();
         }
         // SAFETY: the only test touching this variable.
-        unsafe { std::env::set_var("NIXE_MAIL_DB", &path) };
+        unsafe { std::env::set_var("NYX_MAIL_DB", &path) };
         let hits = answer(&request("search", json!({"query": "ramen"}))).unwrap();
         assert_eq!(hits[0]["title"], "● Ramen on Friday");
         assert_eq!(hits[0]["subtitle"], "Sam Lee · 2026-10-21");

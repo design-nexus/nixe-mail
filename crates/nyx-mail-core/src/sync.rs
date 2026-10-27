@@ -129,7 +129,7 @@ impl<'a> Sync<'a> {
         let caps = session.capabilities().await?;
         let capabilities: HashSet<String> = caps.iter().map(|c| format!("{c:?}").to_ascii_uppercase()).collect();
         let qresync = capabilities.iter().any(|c| c.contains("QRESYNC"))
-            && std::env::var_os("NIXE_MAIL_NO_QRESYNC").is_none()
+            && std::env::var_os("NYX_MAIL_NO_QRESYNC").is_none()
             && session.run_command_and_check_ok("ENABLE QRESYNC").await.is_ok();
         Ok(Self { session, db, store, account, limits, capabilities, qresync })
     }

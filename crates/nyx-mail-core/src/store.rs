@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn stores_once_privately() {
-        let root = std::env::temp_dir().join(format!("nixe-mail-store-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("nyx-mail-store-{}", std::process::id()));
         let store = Store::new(&root);
         let a = store.put(b"Subject: hi\r\n\r\nbody").unwrap();
         let b = store.put(b"Subject: hi\r\n\r\nbody").unwrap();

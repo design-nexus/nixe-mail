@@ -5,7 +5,7 @@
 //! page script (only this app's own measuring, in an isolated world), uses an
 //! ephemeral network session, and loads nothing from the network: a strict
 //! Content-Security-Policy allows only `cid:` parts (served from the store by
-//! the `nixe-mail-msg:` scheme) and `data:` until the user allows the
+//! the `nyx-mail-msg:` scheme) and `data:` until the user allows the
 //! sender's images. Links open in the browser; `mailto:` opens the composer.
 
 use crate::compose;
@@ -18,14 +18,14 @@ use gtk::gdk;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use nixe_mail_core::db::MessageRow;
-use nixe_mail_core::flags;
-use nixe_mail_core::mime::{self, Attachment, Parsed};
+use nyx_mail_core::db::MessageRow;
+use nyx_mail_core::flags;
+use nyx_mail_core::mime::{self, Attachment, Parsed};
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use webkit6::prelude::*;
 
-const SCHEME: &str = "nixe-mail-msg";
+const SCHEME: &str = "nyx-mail-msg";
 
 struct Reader {
     /// Over the conversation: the Screener's question, a snooze, a follow-up.
@@ -400,7 +400,7 @@ pub fn linkify(line: &str) -> String {
         let head = &trimmed[..trimmed.len() - start.len()];
         let href = if start.starts_with("https://") || start.starts_with("http://") {
             Some(start.to_string())
-        } else if nixe_mail_core::send::valid_address(start) && start.contains('.') {
+        } else if nyx_mail_core::send::valid_address(start) && start.contains('.') {
             Some(format!("mailto:{start}"))
         } else {
             None
@@ -588,7 +588,7 @@ fn open_attachment(id: i64, index: usize, name: &str) {
         return;
     };
     // The runtime directory is this user's alone and goes at logout.
-    let dir = glib::user_runtime_dir().join("nixe-mail/open").join(format!("{id}-{index}"));
+    let dir = glib::user_runtime_dir().join("nyx-mail/open").join(format!("{id}-{index}"));
     let path = dir.join(safe_name(name));
     let written = (|| -> std::io::Result<()> {
         use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
@@ -646,7 +646,7 @@ fn context() -> (webkit6::WebContext, webkit6::NetworkSession) {
     })
 }
 
-/// `nixe-mail-msg://cid/<message>/<content id>`: an inline part from the store.
+/// `nyx-mail-msg://cid/<message>/<content id>`: an inline part from the store.
 fn serve(request: &webkit6::URISchemeRequest) {
     let uri = request.uri().map(|u| u.to_string()).unwrap_or_default();
     let found = uri.strip_prefix(&format!("{SCHEME}://cid/")).and_then(|rest| rest.split_once('/')).and_then(|(id, cid)| {
@@ -797,7 +797,7 @@ fn measure(view: &webkit6::WebView, reveal: bool) {
     let v = view.clone();
     view.evaluate_javascript(
         "Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0)",
-        Some("nixe-mail"),
+        Some("nyx-mail"),
         None,
         gio::Cancellable::NONE,
         move |r| {

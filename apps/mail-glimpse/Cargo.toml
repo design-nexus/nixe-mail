@@ -1,5 +1,5 @@
 [package]
-name = "nixe-mail-glimpse"
+name = "nyx-mail-glimpse"
 version = "0.1.1"
 description = "Glimpse search plugin for the mail on this computer"
 edition.workspace = true
@@ -8,11 +8,11 @@ authors.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "nixe-mail-glimpse"
+name = "nyx-mail-glimpse"
 path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-glimpse-plugin-sdk = { git = "https://github.com/design-nexus/nixe-glimpse.git", rev = "e60055b3b10793646b07bcb8b403ef1c67cdfd01" }
-nixe-mail-core = { path = "../../crates/nixe-mail-core" }
+glimpse-plugin-sdk = { git = "https://github.com/design-nexus/nyx-glimpse.git", rev = "6f9f7325259bb05c2bc6a5eb1920ce6caed7aa82" }
+nyx-mail-core = { path = "../../crates/nyx-mail-core" }
 serde_json = "1"

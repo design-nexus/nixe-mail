@@ -1,8 +1,8 @@
-//! nixe-maild: Nixe Mail's engine. It syncs the mail accounts set up in
+//! nyx-maild: Nyx Mail's engine. It syncs the mail accounts set up in
 //! Settings → Online Accounts, keeps `mail.sqlite` and the message store, sends
 //! mail (queuing it while offline) and notifies about new mail. No GTK.
 //!
-//! The window talks to it over `io.github.design_nexus.nixe.MailEngine1` and
+//! The window talks to it over `io.github.design_nexus.nyx.MailEngine1` and
 //! reads `mail.sqlite` itself, read-only. No method returns credentials.
 
 mod accounts;
@@ -10,14 +10,14 @@ mod engine;
 
 use engine::{Command, Event};
 use gio::prelude::*;
-use nixe_mail_core::send::Draft;
+use nyx_mail_core::send::Draft;
 use std::cell::RefCell;
 
-const BUS_NAME: &str = "io.github.design_nexus.nixe.MailEngine";
-const PATH: &str = "/io/github/design_nexus/nixe/MailEngine";
-const INTERFACE: &str = "io.github.design_nexus.nixe.MailEngine1";
+const BUS_NAME: &str = "io.github.design_nexus.nyx.MailEngine";
+const PATH: &str = "/io/github/design_nexus/nyx/MailEngine";
+const INTERFACE: &str = "io.github.design_nexus.nyx.MailEngine1";
 
-const XML: &str = r#"<node><interface name="io.github.design_nexus.nixe.MailEngine1">
+const XML: &str = r#"<node><interface name="io.github.design_nexus.nyx.MailEngine1">
   <method name="Sync"><arg type="s" name="account" direction="in"/></method>
   <method name="SetFlags"><arg type="ax" name="messages" direction="in"/><arg type="x" name="add" direction="in"/><arg type="x" name="remove" direction="in"/></method>
   <method name="Move"><arg type="ax" name="messages" direction="in"/><arg type="s" name="target" direction="in"/></method>
@@ -45,10 +45,10 @@ thread_local! {
     static SHOWN: RefCell<std::collections::HashMap<u32, i64>> = RefCell::new(std::collections::HashMap::new());
 }
 
-const USAGE: &str = "Usage: nixe-maild\n\n  Syncs and sends mail for Nixe Mail. Runs as a user service.\n";
+const USAGE: &str = "Usage: nyx-maild\n\n  Syncs and sends mail for Nyx Mail. Runs as a user service.\n";
 
 fn main() {
-    nixe_core::app::init(nixe_core::app::App { slug: "nixe-mail", name: "Mail" });
+    nyx_core::app::init(nyx_core::app::App { slug: "nyx-mail", name: "Mail" });
     if std::env::args().any(|a| a == "--help" || a == "-h") {
         print!("{USAGE}");
         return;
@@ -67,7 +67,7 @@ fn main() {
         },
         |_, _| {},
         move |_, _| {
-            eprintln!("nixe-maild: already running");
+            eprintln!("nyx-maild: already running");
             quit.quit();
         },
     );
@@ -165,11 +165,11 @@ fn serve(conn: &gio::DBusConnection, engine: tokio::sync::mpsc::UnboundedSender<
                 "SetSender" => {
                     let Some((address, choice)) = params.get::<(String, String)>() else { return bad(invocation) };
                     let Ok(choice) = serde_json::from_str::<serde_json::Value>(&choice) else { return bad(invocation) };
-                    if !nixe_mail_core::send::valid_address(&address) {
+                    if !nyx_mail_core::send::valid_address(&address) {
                         return bad(invocation);
                     }
                     // A key that's there sets that part (null clears it); one that isn't leaves it.
-                    let kind = choice.get("kind").map(|k| k.as_str().and_then(nixe_mail_core::organize::Kind::from_id));
+                    let kind = choice.get("kind").map(|k| k.as_str().and_then(nyx_mail_core::organize::Kind::from_id));
                     let screened =
                         choice.get("screened").map(|v| v.as_str().filter(|s| matches!(*s, "in" | "out")).map(str::to_string));
                     send(Command::SetSender { address, kind, screened });
@@ -204,7 +204,7 @@ fn serve(conn: &gio::DBusConnection, engine: tokio::sync::mpsc::UnboundedSender<
         })
         .build();
     if let Err(e) = registered {
-        eprintln!("nixe-maild: can't serve {INTERFACE}: {e}");
+        eprintln!("nyx-maild: can't serve {INTERFACE}: {e}");
     }
 }
 
@@ -221,8 +221,8 @@ fn answer<T: 'static>(
     glib::MainContext::default().spawn_local(async move {
         match rx.await {
             Ok(Ok(v)) => invocation.return_value(out(v).as_ref()),
-            Ok(Err(e)) => invocation.return_dbus_error("io.github.design_nexus.nixe.MailEngine1.Error", &e),
-            Err(_) => invocation.return_dbus_error("io.github.design_nexus.nixe.MailEngine1.Error", "The mail engine stopped."),
+            Ok(Err(e)) => invocation.return_dbus_error("io.github.design_nexus.nyx.MailEngine1.Error", &e),
+            Err(_) => invocation.return_dbus_error("io.github.design_nexus.nyx.MailEngine1.Error", "The mail engine stopped."),
         }
     });
 }
@@ -258,10 +258,10 @@ fn notify(conn: &gio::DBusConnection, list: &[(i64, String, String)]) {
 /// Shows a notification; clicking it opens `message` in Mail.
 fn show(conn: &gio::DBusConnection, summary: &str, body: &str, message: Option<i64>) {
     let mut hints = std::collections::HashMap::<String, glib::Variant>::new();
-    hints.insert("desktop-entry".into(), "io.github.design_nexus.nixe.Mail".to_variant());
+    hints.insert("desktop-entry".into(), "io.github.design_nexus.nyx.Mail".to_variant());
     hints.insert("category".into(), "email.arrived".to_variant());
     let actions: Vec<String> = vec!["default".into(), "Open".into()];
-    let params = ("Mail", 0u32, "io.github.design_nexus.nixe.Mail", summary, body, actions, hints, -1i32).to_variant();
+    let params = ("Mail", 0u32, "io.github.design_nexus.nyx.Mail", summary, body, actions, hints, -1i32).to_variant();
     conn.call(
         Some("org.freedesktop.Notifications"),
         "/org/freedesktop/Notifications",
@@ -308,15 +308,15 @@ fn watch_notifications(conn: &gio::DBusConnection) {
     );
 }
 
-/// `nixe-mail --message ID`: the one installed beside this program, else on PATH
-/// (tests name another with `NIXE_MAIL_PROGRAM`).
+/// `nyx-mail --message ID`: the one installed beside this program, else on PATH
+/// (tests name another with `NYX_MAIL_PROGRAM`).
 fn open_mail(message: i64) {
-    if let Some(program) = std::env::var_os("NIXE_MAIL_PROGRAM") {
+    if let Some(program) = std::env::var_os("NYX_MAIL_PROGRAM") {
         let _ = std::process::Command::new(program).args(["--message", &message.to_string()]).spawn();
         return;
     }
-    let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("nixe-mail"))).filter(|p| p.exists());
-    let program = beside.unwrap_or_else(|| "nixe-mail".into());
+    let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("nyx-mail"))).filter(|p| p.exists());
+    let program = beside.unwrap_or_else(|| "nyx-mail".into());
     let _ = std::process::Command::new(program)
         .args(["--message", &message.to_string()])
         .stdout(std::process::Stdio::null())

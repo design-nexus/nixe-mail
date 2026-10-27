@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run nixe-mail-core's network tests against a throwaway Dovecot (IMAP, TLS) and
-# an SMTP sink inside the tests, then nixe-maild on a private session bus.
+# Run nyx-mail-core's network tests against a throwaway Dovecot (IMAP, TLS) and
+# an SMTP sink inside the tests, then nyx-maild on a private session bus.
 # Everything lives in a scratch directory and runs as this user; nothing
 # touches real mail or system services.
 #
@@ -15,8 +15,8 @@ if [[ ${1:-} == --run ]]; then
 fi
 command -v dovecot >/dev/null || { echo "Install dovecot to run these tests." >&2; exit 1; }
 if [[ ${#run[@]} == 0 ]]; then
-  cargo test --locked -p nixe-mail-core --features testing --test imap --no-run
-  cargo test --locked -p nixe-maild --test session --no-run
+  cargo test --locked -p nyx-mail-core --features testing --test imap --no-run
+  cargo test --locked -p nyx-maild --test session --no-run
 fi
 
 # Short path: Dovecot's sockets must fit in a Unix socket name.
@@ -31,7 +31,7 @@ mkdir -p "$dir/run" "$dir/state" "$dir/home" "$dir/xdg/data" "$dir/xdg/config" "
 chmod 700 "$dir/xdg/run"
 
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$dir/ca.key" -out "$dir/ca.pem" -days 2 \
-  -subj "/CN=Nixe Mail Test CA" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=keyCertSign" 2>/dev/null
+  -subj "/CN=Nyx Mail Test CA" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=keyCertSign" 2>/dev/null
 openssl req -newkey rsa:2048 -nodes -keyout "$dir/key.pem" -out "$dir/req.csr" -subj "/CN=127.0.0.1" 2>/dev/null
 printf 'subjectAltName=IP:127.0.0.1,DNS:localhost\nextendedKeyUsage=serverAuth\n' >"$dir/ext.cnf"
 openssl x509 -req -in "$dir/req.csr" -CA "$dir/ca.pem" -CAkey "$dir/ca.key" -CAcreateserial \
@@ -108,22 +108,22 @@ $start
 for _ in $(seq 50); do [[ -S $dir/run/login/imap ]] || [[ -f $dir/run/master.pid ]] && break; sleep 0.1; done
 sleep 0.5
 
-export NIXE_MAIL_TEST_DIR=$dir NIXE_MAIL_TEST_IMAP=$imap NIXE_MAIL_TEST_IMAPS=$imaps
-export NIXE_MAIL_EXTRA_CA=$dir/ca.pem NIXE_MAIL_TEST_CERT=$dir/cert.pem NIXE_MAIL_TEST_KEY=$dir/key.pem
-export NIXE_MAIL_TEST_START="$start" NIXE_MAIL_TEST_STOP="kill \$(cat $dir/run/master.pid)"
+export NYX_MAIL_TEST_DIR=$dir NYX_MAIL_TEST_IMAP=$imap NYX_MAIL_TEST_IMAPS=$imaps
+export NYX_MAIL_EXTRA_CA=$dir/ca.pem NYX_MAIL_TEST_CERT=$dir/cert.pem NYX_MAIL_TEST_KEY=$dir/key.pem
+export NYX_MAIL_TEST_START="$start" NYX_MAIL_TEST_STOP="kill \$(cat $dir/run/master.pid)"
 status=0
 if [[ ${#run[@]} -gt 0 ]]; then
   "${run[@]}" || status=$?
   exit "$status"
 fi
-cargo test --locked -p nixe-mail-core --features testing --test imap -- --ignored --test-threads=1 "$@" || status=$?
+cargo test --locked -p nyx-mail-core --features testing --test imap -- --ignored --test-threads=1 "$@" || status=$?
 # Microsoft 365, against the fake Graph server (needs no Dovecot).
-[[ $status == 0 ]] && { cargo test --locked -p nixe-mail-core --features testing --test graph "$@" || status=$?; }
+[[ $status == 0 ]] && { cargo test --locked -p nyx-mail-core --features testing --test graph "$@" || status=$?; }
 # The engine, on a private session bus with scratch XDG directories.
 if [[ $status == 0 ]]; then
   XDG_DATA_HOME=$dir/xdg/data XDG_CONFIG_HOME=$dir/xdg/config XDG_CACHE_HOME=$dir/xdg/cache \
     XDG_RUNTIME_DIR=$dir/xdg/run GSETTINGS_BACKEND=memory GIO_USE_VFS=local \
-    dbus-run-session -- cargo test --locked -p nixe-maild --test session -- --ignored --test-threads=1 "$@" || status=$?
+    dbus-run-session -- cargo test --locked -p nyx-maild --test session -- --ignored --test-threads=1 "$@" || status=$?
 fi
 [[ $status == 0 ]] || tail -20 "$dir/dovecot.log" >&2
 exit "$status"

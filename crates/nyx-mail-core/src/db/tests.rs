@@ -3,7 +3,7 @@ use crate::flags::{FLAGGED, SEEN};
 use crate::mime::{Parsed, Person};
 
 fn db() -> (Db, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("nixe-mail-db-{}-{}", std::process::id(), rand_suffix()));
+    let dir = std::env::temp_dir().join(format!("nyx-mail-db-{}-{}", std::process::id(), rand_suffix()));
     std::fs::create_dir_all(&dir).unwrap();
     (Db::open(&dir.join("mail.sqlite")).unwrap(), dir)
 }
@@ -128,9 +128,9 @@ fn mailboxes_by_role_and_retain() {
     db.upsert_account("acc", "me@example.com", "").unwrap();
     db.upsert_mailbox("acc", "[Gmail]/Trash", Some("/"), Role::detect("[Gmail]/Trash", ["\\Trash"])).unwrap();
     db.upsert_mailbox("acc", "INBOX", Some("/"), Role::detect("INBOX", [])).unwrap();
-    db.upsert_mailbox("acc", "Projects/Nixe", Some("/"), Role::detect("Projects/Nixe", [])).unwrap();
+    db.upsert_mailbox("acc", "Projects/Nyx", Some("/"), Role::detect("Projects/Nyx", [])).unwrap();
     let names: Vec<String> = db.mailboxes(Some("acc")).unwrap().iter().map(|m| m.label()).collect();
-    assert_eq!(names, vec!["Inbox", "Trash", "Nixe"]);
+    assert_eq!(names, vec!["Inbox", "Trash", "Nyx"]);
     assert!(db.mailbox_by_role("acc", Role::Trash).unwrap().is_some());
     assert_eq!(db.retain_mailboxes("acc", &["INBOX".into()]).unwrap(), 2);
     assert_eq!(db.mailboxes(Some("acc")).unwrap().len(), 1);
@@ -200,7 +200,7 @@ fn people_to_suggest() {
 
 #[test]
 fn version_one_databases_are_sorted_on_upgrade() {
-    let dir = std::env::temp_dir().join(format!("nixe-mail-migrate-{}-{}", std::process::id(), rand_suffix()));
+    let dir = std::env::temp_dir().join(format!("nyx-mail-migrate-{}-{}", std::process::id(), rand_suffix()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("mail.sqlite");
     {

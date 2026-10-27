@@ -3,11 +3,11 @@
 //! from GOA for each connection and are never kept.
 //!
 //! Tests (and only tests) can add accounts from a JSON file named by
-//! `NIXE_MAIL_TEST_ACCOUNTS`: `[{"id", "address", "name", "imap": {host, port,
+//! `NYX_MAIL_TEST_ACCOUNTS`: `[{"id", "address", "name", "imap": {host, port,
 //! security, user}, "smtp": {...}, "password"}]`, or with `"graph": BASE_URL`
 //! in place of `imap` and `smtp` (the password is then the token).
 
-use nixe_mail_core::net::{Auth, NetError, Security, Server};
+use nyx_mail_core::net::{Auth, NetError, Security, Server};
 use serde::Deserialize;
 
 #[derive(Clone, Debug)]
@@ -35,7 +35,7 @@ pub enum Backend {
 
 #[derive(Clone)]
 enum Source {
-    Goa { account: Box<nixe_accounts::Account>, oauth: bool },
+    Goa { account: Box<nyx_accounts::Account>, oauth: bool },
     Test { password: String },
 }
 
@@ -56,30 +56,30 @@ pub struct Skipped {
     pub reason: String,
 }
 
-fn security(tls: nixe_accounts::mail::Tls) -> Option<Security> {
+fn security(tls: nyx_accounts::mail::Tls) -> Option<Security> {
     match tls {
-        nixe_accounts::mail::Tls::Implicit => Some(Security::Implicit),
-        nixe_accounts::mail::Tls::StartTls => Some(Security::StartTls),
-        nixe_accounts::mail::Tls::None => None,
+        nyx_accounts::mail::Tls::Implicit => Some(Security::Implicit),
+        nyx_accounts::mail::Tls::StartTls => Some(Security::StartTls),
+        nyx_accounts::mail::Tls::None => None,
     }
 }
 
-fn server(s: &nixe_accounts::mail::Server) -> Option<Server> {
+fn server(s: &nyx_accounts::mail::Server) -> Option<Server> {
     Some(Server { host: s.host.clone(), port: s.port, security: security(s.tls)?, user: s.user.clone() })
 }
 
 /// Every usable mail account, and the ones that can't be used (and why).
-pub fn discover(client: Option<&nixe_accounts::Client>) -> (Vec<MailAccount>, Vec<Skipped>) {
+pub fn discover(client: Option<&nyx_accounts::Client>) -> (Vec<MailAccount>, Vec<Skipped>) {
     let mut accounts = Vec::new();
     let mut skipped = Vec::new();
     if let Some(client) = client {
-        for account in client.with_service(&nixe_accounts::Service::Mail).unwrap_or_default() {
+        for account in client.with_service(&nyx_accounts::Service::Mail).unwrap_or_default() {
             if account.provider_type == "ms_graph" {
                 accounts.push(MailAccount {
                     id: account.id.clone(),
                     address: account.identity.clone(),
                     name: String::new(),
-                    backend: Backend::Graph { base: nixe_mail_core::graph::GRAPH.into() },
+                    backend: Backend::Graph { base: nyx_mail_core::graph::GRAPH.into() },
                     source: Source::Goa { oauth: true, account: Box::new(account) },
                 });
                 continue;
@@ -113,7 +113,7 @@ pub fn discover(client: Option<&nixe_accounts::Client>) -> (Vec<MailAccount>, Ve
                     gmail: account.provider_type == "google" || imap.host.ends_with("gmail.com"),
                     imap,
                 },
-                source: Source::Goa { oauth: settings.auth == nixe_accounts::mail::MailAuth::OAuth2, account: Box::new(account) },
+                source: Source::Goa { oauth: settings.auth == nyx_accounts::mail::MailAuth::OAuth2, account: Box::new(account) },
             });
         }
     }
@@ -142,7 +142,7 @@ struct TestAccount {
 }
 
 fn test_accounts() -> Vec<MailAccount> {
-    let Some(path) = std::env::var_os("NIXE_MAIL_TEST_ACCOUNTS") else { return Vec::new() };
+    let Some(path) = std::env::var_os("NYX_MAIL_TEST_ACCOUNTS") else { return Vec::new() };
     let Ok(text) = std::fs::read_to_string(&path) else { return Vec::new() };
     let list: Vec<TestAccount> = serde_json::from_str(&text).unwrap_or_default();
     let conv = |s: TestServer| Server {
@@ -183,24 +183,24 @@ impl MailAccount {
     }
 
     /// A Graph connection with a fresh token (Graph accounts only).
-    pub fn graph(&self, client: Option<&nixe_accounts::Client>) -> Result<nixe_mail_core::graph::Graph, NetError> {
+    pub fn graph(&self, client: Option<&nyx_accounts::Client>) -> Result<nyx_mail_core::graph::Graph, NetError> {
         let Backend::Graph { base } = &self.backend else { return Err(NetError::Refused("not a Microsoft 365 account".into())) };
         let token = match self.auth(client, "").map_err(NetError::SignIn)? {
             Auth::OAuth2(token) | Auth::Password(token) => token,
         };
-        nixe_mail_core::graph::Graph::new(base, token)
+        nyx_mail_core::graph::Graph::new(base, token)
     }
 
     /// Credentials for IMAP, fresh from GOA.
-    pub fn imap_auth(&self, client: Option<&nixe_accounts::Client>) -> Result<Auth, String> {
+    pub fn imap_auth(&self, client: Option<&nyx_accounts::Client>) -> Result<Auth, String> {
         self.auth(client, "imap-password")
     }
 
-    pub fn smtp_auth(&self, client: Option<&nixe_accounts::Client>) -> Result<Auth, String> {
+    pub fn smtp_auth(&self, client: Option<&nyx_accounts::Client>) -> Result<Auth, String> {
         self.auth(client, "smtp-password")
     }
 
-    fn auth(&self, client: Option<&nixe_accounts::Client>, password_id: &str) -> Result<Auth, String> {
+    fn auth(&self, client: Option<&nyx_accounts::Client>, password_id: &str) -> Result<Auth, String> {
         match &self.source {
             Source::Test { password } => Ok(Auth::Password(password.clone())),
             Source::Goa { account, oauth } => {
@@ -218,7 +218,7 @@ impl MailAccount {
 
     /// Asks GOA to check the account's sign-in (after the server refused it), so
     /// Settings shows "needs sign-in".
-    pub fn check_sign_in(&self, client: Option<&nixe_accounts::Client>) {
+    pub fn check_sign_in(&self, client: Option<&nyx_accounts::Client>) {
         if let (Source::Goa { account, .. }, Some(client)) = (&self.source, client) {
             let _ = client.ensure_credentials(&account.path);
         }

@@ -1,5 +1,5 @@
 [package]
-name = "nixe-mail"
+name = "nyx-mail"
 version = "0.1.1"
 description = "Mail for Omarchy: every account in one inbox, local-first"
 license.workspace = true
@@ -8,18 +8,18 @@ authors.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "nixe-mail"
+name = "nyx-mail"
 path = "src/main.rs"
 
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 glib = "0.22"
 gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
-nixe-accounts = { git = "https://github.com/design-nexus/nixe-core.git", rev = "87682e6c936b6a4f006639b1a1c099e96346c07c" }
-nixe-core = { git = "https://github.com/design-nexus/nixe-core.git", rev = "87682e6c936b6a4f006639b1a1c099e96346c07c" }
-nixe-mail-core = { path = "../../crates/nixe-mail-core" }
-nixe-theme = { git = "https://github.com/design-nexus/nixe-design.git", rev = "b8204de80644e263e32783602f2e0ae393578c9e" }
-nixe-ui = { git = "https://github.com/design-nexus/nixe-design.git", rev = "b8204de80644e263e32783602f2e0ae393578c9e" }
+nyx-accounts = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c" }
+nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c" }
+nyx-mail-core = { path = "../../crates/nyx-mail-core" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "938c638951a53f5874a8276d07ac9dcd68b191ad" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "938c638951a53f5874a8276d07ac9dcd68b191ad" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 webkit6 = { version = "0.6.1", features = ["v2_50"] }

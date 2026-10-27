@@ -1,7 +1,7 @@
 [package]
-name = "nixe-mail-core"
+name = "nyx-mail-core"
 version = "0.1.1"
-description = "Mail store, MIME, search and sync for Nixe Mail"
+description = "Mail store, MIME, search and sync for Nyx Mail"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true

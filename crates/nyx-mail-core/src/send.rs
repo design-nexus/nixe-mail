@@ -287,7 +287,7 @@ pub fn forward(original: &Parsed, attachments: Vec<FileAttachment>, from: Person
 /// Sends a raw message over SMTP.
 pub async fn smtp(server: &Server, auth: Auth, from: &str, to: &[String], raw: &[u8]) -> Result<(), NetError> {
     let mut tls = TlsParameters::builder(server.host.clone());
-    if let Some(path) = std::env::var_os("NIXE_MAIL_EXTRA_CA")
+    if let Some(path) = std::env::var_os("NYX_MAIL_EXTRA_CA")
         && let Ok(pem) = std::fs::read(&path)
         && let Ok(cert) = Certificate::from_pem(&pem)
     {

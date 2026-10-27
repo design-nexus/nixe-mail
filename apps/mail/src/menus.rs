@@ -8,10 +8,10 @@ use crate::widgets::{self, MenuEntry, danger, disabled, item, keyed, separator, 
 use crate::window::{self, Row};
 use crate::{engine, organize, prefs, reader, reminders};
 use gtk::prelude::*;
-use nixe_mail_core::AccountRow;
-use nixe_mail_core::db::{Mailbox, Role};
-use nixe_mail_core::flags;
-use nixe_mail_core::organize::Kind;
+use nyx_mail_core::AccountRow;
+use nyx_mail_core::db::{Mailbox, Role};
+use nyx_mail_core::flags;
+use nyx_mail_core::organize::Kind;
 use serde_json::json;
 
 /// A list row's menu, at a point in its widget. The row is selected first,

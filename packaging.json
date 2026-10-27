@@ -2,8 +2,8 @@
   "application": "mail",
   "directory": "mail",
   "packages": [
-    "nixe-mail",
-    "nixe-maild"
+    "nyx-mail",
+    "nyx-maild"
   ],
   "manifest": "Cargo.toml",
   "prepare": [],
@@ -14,11 +14,11 @@
       "test",
       "--locked",
       "-p",
-      "nixe-mail-core",
+      "nyx-mail-core",
       "-p",
-      "nixe-mail",
+      "nyx-mail",
       "-p",
-      "nixe-maild"
+      "nyx-maild"
     ]
   ]
 }

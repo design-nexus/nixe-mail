@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     fn graph_ids() {
-        let dir = std::env::temp_dir().join(format!("nixe-mail-graph-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nyx-mail-graph-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let _ = std::fs::remove_file(dir.join("mail.sqlite"));
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();

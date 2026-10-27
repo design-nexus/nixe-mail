@@ -3,7 +3,7 @@
 1. No passwords or tokens in `settings.toml`, `mail.sqlite`, logs or command lines.
    Credentials come from GOA in-process for each connection, as a redacted `Secret`.
 2. TLS only. Certificate errors fail visibly.
-3. `~/.local/share/nixe-mail` is 0700; files in it 0600.
+3. `~/.local/share/nyx-mail` is 0700; files in it 0600.
 4. HTML is sanitized, rendered with JavaScript off and with no network unless images are
    allowed. Remote images are off by default, which also blocks tracking pixels.
 5. Attachments are never executed. Opening one copies it to a 0600 temp file and hands it

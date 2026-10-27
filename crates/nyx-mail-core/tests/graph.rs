@@ -1,15 +1,15 @@
 //! Sync and sending for Microsoft 365 accounts, against the fake Graph server
-//! in `nixe_mail_core::fake_graph` (no network, no real mailbox).
-//! `cargo test -p nixe-mail-core --features testing --test graph`.
+//! in `nyx_mail_core::fake_graph` (no network, no real mailbox).
+//! `cargo test -p nyx-mail-core --features testing --test graph`.
 
-use nixe_mail_core::db::{Db, Role};
-use nixe_mail_core::fake_graph::FakeGraph;
-use nixe_mail_core::flags::{FLAGGED, SEEN};
-use nixe_mail_core::graph::{Graph, GraphSync};
-use nixe_mail_core::net::NetError;
-use nixe_mail_core::store::Store;
-use nixe_mail_core::sync::{self, Limits, Report};
-use nixe_mail_core::testing::{message, message_from, now};
+use nyx_mail_core::db::{Db, Role};
+use nyx_mail_core::fake_graph::FakeGraph;
+use nyx_mail_core::flags::{FLAGGED, SEEN};
+use nyx_mail_core::graph::{Graph, GraphSync};
+use nyx_mail_core::net::NetError;
+use nyx_mail_core::store::Store;
+use nyx_mail_core::sync::{self, Limits, Report};
+use nyx_mail_core::testing::{message, message_from, now};
 use std::path::PathBuf;
 
 /// `secs` as Graph writes times.
@@ -41,7 +41,7 @@ struct Local {
 
 impl Local {
     fn new(account: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("nixe-mail-graph-test-{}-{account}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nyx-mail-graph-test-{}-{account}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let db = Db::open(&dir.join("mail.sqlite")).unwrap();
@@ -117,7 +117,7 @@ async fn folders_messages_and_server_changes() {
 
     // Another client reads one, deletes one, and new mail arrives.
     let server = fake.messages("Inbox");
-    let id = |s: &str| server.iter().find(|m| nixe_mail_core::mime::parse(&m.raw).unwrap().subject == s).unwrap().id.clone();
+    let id = |s: &str| server.iter().find(|m| nyx_mail_core::mime::parse(&m.raw).unwrap().subject == s).unwrap().id.clone();
     fake.set_read(&id("Two"), true);
     fake.delete(&id("Three"));
     fake.deliver("Inbox", &message("Five", "Body of Five"), &ago(1));
@@ -147,7 +147,7 @@ async fn changes_made_here_reach_the_server() {
     let report = local.sync(&fake).await;
     assert_eq!(report.ops_sent, 4);
 
-    let subject = |m: &nixe_mail_core::fake_graph::Message| nixe_mail_core::mime::parse(&m.raw).unwrap().subject;
+    let subject = |m: &nyx_mail_core::fake_graph::Message| nyx_mail_core::mime::parse(&m.raw).unwrap().subject;
     let inbox = fake.messages("Inbox");
     assert_eq!(inbox.len(), 1);
     assert!(inbox[0].read && inbox[0].flagged, "read and flagged on the server");
@@ -217,7 +217,7 @@ async fn sending_keeps_bcc_for_graph_only() {
     let raw = message_from("me@example.test", "Hello", "Hi there");
     let everyone = ["sam@example.test".to_string(), "secret@example.test".into()];
     let raw = String::from_utf8(raw).unwrap().replace("To: ", "To: sam@example.test, ").into_bytes();
-    let bcc = nixe_mail_core::graph::bcc_of(&raw, &everyone);
+    let bcc = nyx_mail_core::graph::bcc_of(&raw, &everyone);
     graph.send_mime(&raw, &bcc).await.unwrap();
     let sent = fake.sent();
     assert_eq!(sent.len(), 1);

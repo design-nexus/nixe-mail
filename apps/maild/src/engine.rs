@@ -4,14 +4,14 @@
 //! D-Bus side what changed.
 
 use crate::accounts::{self, Backend, MailAccount, Skipped};
-use nixe_mail_core::db::Role;
-use nixe_mail_core::graph::{self, GraphSync};
-use nixe_mail_core::net::{self, NetError};
-use nixe_mail_core::organize::Kind;
-use nixe_mail_core::send::{self, Draft};
-use nixe_mail_core::store::Store;
-use nixe_mail_core::sync::{self, Limits, Sync};
-use nixe_mail_core::{Db, Paths, async_imap, flags, rusqlite};
+use nyx_mail_core::db::Role;
+use nyx_mail_core::graph::{self, GraphSync};
+use nyx_mail_core::net::{self, NetError};
+use nyx_mail_core::organize::Kind;
+use nyx_mail_core::send::{self, Draft};
+use nyx_mail_core::store::Store;
+use nyx_mail_core::sync::{self, Limits, Sync};
+use nyx_mail_core::{Db, Paths, async_imap, flags, rusqlite};
 use serde_json::json;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -61,7 +61,7 @@ pub enum Command {
         screened: Option<Option<String>>,
     },
     SetScreener(bool),
-    /// One of the engine's settings (`nixe_mail_core::db` `ENGINE_SETTINGS`).
+    /// One of the engine's settings (`nyx_mail_core::db` `ENGINE_SETTINGS`).
     SetSetting(String, String),
     /// Hide a message's conversation until a time (0: bring it back now).
     Snooze(i64, i64),
@@ -100,7 +100,7 @@ pub fn start(events: impl Fn(Event) + Send + 'static) -> mpsc::UnboundedSender<C
 struct State {
     db: Db,
     store: Store,
-    goa: Option<nixe_accounts::Client>,
+    goa: Option<nyx_accounts::Client>,
     accounts: Vec<MailAccount>,
     skipped: Vec<Skipped>,
     syncing: HashSet<String>,
@@ -118,7 +118,7 @@ fn now() -> i64 {
 }
 
 pub fn paths() -> Paths {
-    Paths::new(nixe_core::paths::data_dir())
+    Paths::new(nyx_core::paths::data_dir())
 }
 
 async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender<Command>, events: impl Fn(Event) + 'static) {
@@ -127,14 +127,14 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
     let db = match Db::open(&paths.db()) {
         Ok(db) => db,
         Err(e) => {
-            eprintln!("nixe-maild: can't open {}: {e}", paths.db().display());
+            eprintln!("nyx-maild: can't open {}: {e}", paths.db().display());
             return;
         }
     };
     let state: Shared = Rc::new(RefCell::new(State {
         db,
         store: Store::new(paths.store()),
-        goa: nixe_accounts::Client::connect().ok(),
+        goa: nyx_accounts::Client::connect().ok(),
         accounts: Vec::new(),
         skipped: Vec::new(),
         syncing: HashSet::new(),
@@ -157,10 +157,10 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
     {
         let s = state.borrow();
         let store = &s.store;
-        match s.db.resort(|raw| store.get(raw).ok().and_then(|bytes| nixe_mail_core::mime::parse(&bytes))) {
+        match s.db.resort(|raw| store.get(raw).ok().and_then(|bytes| nyx_mail_core::mime::parse(&bytes))) {
             Ok(0) => {}
-            Ok(n) => eprintln!("nixe-maild: sorted {n} messages again"),
-            Err(e) => eprintln!("nixe-maild: sorting: {e}"),
+            Ok(n) => eprintln!("nyx-maild: sorted {n} messages again"),
+            Err(e) => eprintln!("nyx-maild: sorting: {e}"),
         }
     }
     events(Event::Changed("status"));
@@ -299,7 +299,7 @@ async fn run(mut rx: mpsc::UnboundedReceiver<Command>, me: mpsc::UnboundedSender
             }
             Command::SetSetting(key, value) => {
                 let saved = with_db(&state, |db| db.set_engine_setting(&key, &value)).unwrap_or(false);
-                if saved && key == nixe_mail_core::db::DISABLED_ACCOUNTS {
+                if saved && key == nyx_mail_core::db::DISABLED_ACCOUNTS {
                     rediscover(&state);
                     publish(&state);
                     // Back on: catch up now.
@@ -367,7 +367,7 @@ fn with_db<T>(state: &Shared, f: impl FnOnce(&Db) -> rusqlite::Result<T>) -> Opt
     match f(&state.borrow().db) {
         Ok(v) => Some(v),
         Err(e) => {
-            eprintln!("nixe-maild: database: {e}");
+            eprintln!("nyx-maild: database: {e}");
             None
         }
     }
@@ -457,7 +457,7 @@ async fn sync_account(state: &Shared, account: &MailAccount, events: &Rc<dyn Fn(
                 }
             }
             drop(s);
-            eprintln!("nixe-maild: {}: {e}", account.address);
+            eprintln!("nyx-maild: {}: {e}", account.address);
         }
     }
     events(Event::Changed("status"));
@@ -509,7 +509,7 @@ fn s_notify(state: &Shared) -> bool {
 fn poll(state: Shared, account: MailAccount, me: mpsc::UnboundedSender<Command>) {
     state.borrow_mut().idling.insert(account.id.clone());
     tokio::task::spawn_local(async move {
-        let every = std::env::var("NIXE_MAIL_POLL_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(180);
+        let every = std::env::var("NYX_MAIL_POLL_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(180);
         loop {
             tokio::time::sleep(Duration::from_secs(every)).await;
             if !state.borrow().accounts.iter().any(|a| a.id == account.id) {
@@ -559,7 +559,7 @@ fn idle(state: Shared, account: MailAccount, me: mpsc::UnboundedSender<Command>)
                 Err(e) => {
                     failures += 1;
                     if failures == 1 {
-                        eprintln!("nixe-maild: {} idle: {e}", account.address);
+                        eprintln!("nyx-maild: {} idle: {e}", account.address);
                     }
                     // Back off: offline or a server without IDLE.
                     tokio::time::sleep(Duration::from_secs((30u64 << failures.min(5)).min(900))).await;
@@ -826,13 +826,13 @@ fn unschedule(state: &Shared, op: i64) -> Result<i64, String> {
     let s = state.borrow();
     let taken = s.db.unschedule(op, now()).map_err(|e| e.to_string())?.ok_or("That message already went, or isn't scheduled.")?;
     let raw = s.store.get(&taken.raw).map_err(|e| e.to_string())?;
-    let parsed = nixe_mail_core::mime::parse(&raw).ok_or("The scheduled message couldn't be read.")?;
+    let parsed = nyx_mail_core::mime::parse(&raw).ok_or("The scheduled message couldn't be read.")?;
     let named: Vec<String> = parsed.to.iter().chain(&parsed.cc).map(|p| p.email.to_lowercase()).collect();
     let bcc = taken
         .to
         .iter()
         .filter(|e| !named.contains(&e.to_lowercase()))
-        .map(|e| nixe_mail_core::mime::Person { name: String::new(), email: e.clone() })
+        .map(|e| nyx_mail_core::mime::Person { name: String::new(), email: e.clone() })
         .collect();
     let attachments = parsed
         .attachments
@@ -841,7 +841,7 @@ fn unschedule(state: &Shared, op: i64) -> Result<i64, String> {
             Some(send::FileAttachment {
                 name: a.name.clone(),
                 mime: a.mime.clone(),
-                bytes: nixe_mail_core::mime::attachment_bytes(&raw, a.index)?,
+                bytes: nyx_mail_core::mime::attachment_bytes(&raw, a.index)?,
             })
         })
         .collect();
@@ -861,7 +861,7 @@ fn unschedule(state: &Shared, op: i64) -> Result<i64, String> {
     s.db.save_draft(None, &taken.account, &data, now()).map_err(|e| e.to_string())
 }
 
-/// 30 s (tests shorten it with `NIXE_MAIL_TICK_SECONDS`).
+/// 30 s (tests shorten it with `NYX_MAIL_TICK_SECONDS`).
 fn tick_every() -> Duration {
-    Duration::from_secs(std::env::var("NIXE_MAIL_TICK_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(30).max(1))
+    Duration::from_secs(std::env::var("NYX_MAIL_TICK_SECONDS").ok().and_then(|v| v.parse().ok()).unwrap_or(30).max(1))
 }

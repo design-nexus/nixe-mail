@@ -1,4 +1,4 @@
-//! Mail's tools on the control interface (`nixe_core::control`), for Nixe
+//! Mail's tools on the control interface (`nyx_core::control`), for Nyx
 //! Assistant: search and read mail, list the inbox, show a conversation, and
 //! start a message for the user to check and send. Nothing here sends mail;
 //! sending is always the user's own press of Send. Message text is returned as
@@ -7,10 +7,10 @@
 use crate::compose::{self, Start};
 use crate::data;
 use crate::window;
-use nixe_core::control::{Reply, text};
-use nixe_mail_core::db::{ListItem, Role};
-use nixe_mail_core::flags;
-use nixe_mail_core::send::{self, Draft};
+use nyx_core::control::{Reply, text};
+use nyx_mail_core::db::{ListItem, Role};
+use nyx_mail_core::flags;
+use nyx_mail_core::send::{self, Draft};
 use serde_json::{Value, json};
 
 const MAX: usize = 50;

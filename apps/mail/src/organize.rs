@@ -1,7 +1,7 @@
 //! Sorting and timing, in the window: the Snooze and More menus of the reading
 //! pane, the banners over a conversation (Screener, snoozed, follow-up), and
 //! the cards for scheduled mail and for a sender. All of it is kept on this
-//! computer by nixe-maild; nothing moves on the server.
+//! computer by nyx-maild; nothing moves on the server.
 
 use crate::compose::{self, Start};
 use crate::data;
@@ -11,8 +11,8 @@ use crate::widgets;
 use crate::window;
 use chrono::{Datelike, Duration, Local, NaiveTime, TimeZone, Timelike, Weekday};
 use gtk::prelude::*;
-use nixe_mail_core::db::{MessageRow, Scheduled, SenderRow};
-use nixe_mail_core::organize::Kind;
+use nyx_mail_core::db::{MessageRow, Scheduled, SenderRow};
+use nyx_mail_core::organize::Kind;
 use serde_json::json;
 
 fn at(day: chrono::NaiveDate, hour: u32) -> i64 {
@@ -189,7 +189,7 @@ fn fill_more(button: &gtk::MenuButton) {
             let a = address.clone();
             items.push(("Screen them out".into(), Box::new(move || engine::set_sender(&a, json!({"screened": "out"})))));
         }
-        let inboxes = data::View::All(nixe_mail_core::db::Role::Inbox).mailboxes(&data::mailboxes());
+        let inboxes = data::View::All(nyx_mail_core::db::Role::Inbox).mailboxes(&data::mailboxes());
         let unsubscribe = data::sender(&address, &inboxes).and_then(|s| s.unsubscribe);
         if let Some(link) = unsubscribe.or_else(|| list_unsubscribe(&sender)) {
             items.push(("Unsubscribe…".into(), Box::new(move || reader::open_link(&link))));
@@ -201,7 +201,7 @@ fn fill_more(button: &gtk::MenuButton) {
 /// The unsubscribe link of a message (read from the store).
 fn list_unsubscribe(m: &MessageRow) -> Option<String> {
     let (_, parsed) = data::parsed(m)?;
-    nixe_mail_core::organize::unsubscribe_link(parsed.list_unsubscribe.as_deref()?)
+    nyx_mail_core::organize::unsubscribe_link(parsed.list_unsubscribe.as_deref()?)
 }
 
 // ---------- Banners over a conversation ----------
@@ -314,7 +314,7 @@ pub fn discard_scheduled(op: i64) {
 
 /// Archives everything of a sender's in the inbox.
 pub fn archive_all_from(address: &str) {
-    let inboxes = data::View::All(nixe_mail_core::db::Role::Inbox).mailboxes(&data::mailboxes());
+    let inboxes = data::View::All(nyx_mail_core::db::Role::Inbox).mailboxes(&data::mailboxes());
     let ids = data::messages_from(address, &inboxes);
     if ids.is_empty() {
         window::toast("None of their mail is in the inbox.");
@@ -331,7 +331,7 @@ pub fn archive_all_from(address: &str) {
 pub fn unsubscribe_link() -> Option<String> {
     let (_, theirs) = open_messages()?;
     let sender = theirs?;
-    let inboxes = data::View::All(nixe_mail_core::db::Role::Inbox).mailboxes(&data::mailboxes());
+    let inboxes = data::View::All(nyx_mail_core::db::Role::Inbox).mailboxes(&data::mailboxes());
     data::sender(&sender.from_addr, &inboxes).and_then(|s| s.unsubscribe).or_else(|| list_unsubscribe(&sender))
 }
 
@@ -370,7 +370,7 @@ pub fn sender_card(s: &SenderRow) -> gtk::Widget {
         open.connect_clicked(move |_| reader::open_link(&link));
         group.append(&widgets::row("Unsubscribe", "They offer a way to stop their mail.", Some(open.upcast_ref())));
     }
-    let archive = widgets::icon_button("nixe-mail-archive-symbolic", "Archive all their mail in the inbox");
+    let archive = widgets::icon_button("nyx-mail-archive-symbolic", "Archive all their mail in the inbox");
     let address = s.address.clone();
     archive.connect_clicked(move |_| archive_all_from(&address));
     group.append(&widgets::row("Archive all", "Everything of theirs in the inbox.", Some(archive.upcast_ref())));
