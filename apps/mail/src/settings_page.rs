@@ -45,11 +45,7 @@ fn window_group(page: &Page) {
         group.add(&row);
     }
     group.add(&theme_row);
-    let (row, _) = widgets::switch_row("Glow", "Soft accent glow around focused and selected elements.", prefs.glow, |on| {
-        prefs::update(|p| p.glow = on);
-        theme::apply();
-    });
-    group.add(&row);
+    group.add(&nyx_ui::widgets::accent_row("mail"));
     let (row, _) = widgets::switch_row("Reduce motion", "Turn off transitions in this window.", prefs.reduce_motion, |on| {
         prefs::update(|p| p.reduce_motion = on);
         theme::apply();

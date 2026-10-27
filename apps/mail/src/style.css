@@ -1,10 +1,18 @@
-/* Mail: only what the shared base.css doesn't already style. */
+/* Mail on Nyx 2.0: only Mail's own parts. One surface: spacing and soft fills
+   separate the folders, the list and the reader, never lines. */
+
+window.mail-window .app-header button.accent-action {
+  color: @theme_accent;
+}
+
+window.mail-window .app-header button.accent-action:hover {
+  background: alpha(@theme_accent, 0.14);
+}
 
 .toolbar {
   background: transparent;
   min-height: 46px;
   padding: 0 12px 0 20px;
-  border-bottom: 1px solid @hairline;
 }
 
 .toolbar-title {
@@ -29,14 +37,9 @@ window.mail-window .reader-bar button {
 
 .banners {
   padding: 12px 16px;
-  border-bottom: 1px solid @hairline;
 }
 
 /* The list */
-
-.list-column {
-  border-right: 1px solid @hairline;
-}
 
 .mail-list {
   background: transparent;
@@ -44,7 +47,8 @@ window.mail-window .reader-bar button {
 
 .mail-list > row {
   padding: 0;
-  border-bottom: 1px solid @divider;
+  margin: 0 8px 2px 8px;
+  border-radius: var(--nyx-radius-small);
 }
 
 .mail-list > row:hover {
@@ -52,11 +56,11 @@ window.mail-window .reader-bar button {
 }
 
 .mail-list > row:selected {
-  background: @nav_active;
+  background: alpha(@theme_accent, 0.16);
 }
 
 .mail-row {
-  padding: 10px 16px 11px 20px;
+  padding: 9px 12px 10px 12px;
 }
 
 .mail-from {
@@ -82,7 +86,7 @@ window.mail-window .reader-bar button {
 }
 
 .thread-count {
-  border: 1px solid @hairline;
+  background: @field;
   border-radius: 4px;
   padding: 0 5px;
 }
@@ -119,9 +123,8 @@ window.mail-window .reader-bar button {
 }
 
 .message-card {
-  background: @theme_surface;
-  border: 1px solid @hairline;
-  border-radius: 10px;
+  background: @theme_card;
+  border-radius: var(--nyx-radius-card);
   padding: 14px 16px;
 }
 
@@ -130,7 +133,7 @@ window.mail-window .reader-bar button {
 }
 
 .message-card.collapsed:hover {
-  background: @row_hover;
+  background: @lift_active;
 }
 
 .avatar {
@@ -162,7 +165,7 @@ window.mail-window .reader-bar button {
 }
 
 .message-html {
-  border-radius: 6px;
+  border-radius: var(--nyx-radius-small);
 }
 
 .remote-banner {
@@ -170,8 +173,8 @@ window.mail-window .reader-bar button {
 }
 
 .attachment {
-  border: 1px solid @hairline;
-  border-radius: 6px;
+  background: @field;
+  border-radius: var(--nyx-radius-small);
   padding: 2px 4px 2px 10px;
 }
 
@@ -181,13 +184,8 @@ window.mail-window .reader-bar button {
 
 /* Writing */
 
-.compose-fields {
-  border-bottom: 1px solid @hairline;
-}
-
 .compose-field {
   padding: 6px 20px;
-  border-bottom: 1px solid @divider;
 }
 
 .compose-label {
@@ -208,7 +206,6 @@ window.mail-window .reader-bar button {
 
 .compose-files {
   padding: 10px 20px;
-  border-top: 1px solid @hairline;
 }
 
 .status-readout.error {
@@ -216,8 +213,8 @@ window.mail-window .reader-bar button {
 }
 
 .signature-box {
-  border: 1px solid @hairline;
-  border-radius: 6px;
+  background: @field;
+  border-radius: var(--nyx-radius-small);
 }
 
 .signature-text {
@@ -245,8 +242,7 @@ window.mail-window .reader-bar button {
 }
 
 .kinds-bar {
-  padding: 8px 16px;
-  border-bottom: 1px solid @hairline;
+  padding: 4px 16px 8px 16px;
 }
 
 .kinds-bar .segmented {
@@ -273,6 +269,6 @@ window.mail-window .reader-bar button {
 
 /* The list's Show only unread toggle, while it's on. */
 window.mail-window button.unread-toggle:checked {
-  background: @nav_active;
+  background: alpha(@theme_accent, 0.16);
   color: @theme_accent;
 }

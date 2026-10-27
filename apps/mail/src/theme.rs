@@ -5,6 +5,7 @@ pub use nyx_theme::*;
 use crate::prefs;
 
 pub fn install() {
+    nyx_theme::use_design_2();
     nyx_theme::install(Style {
         window_class: "mail-window",
         base_skip: &[],

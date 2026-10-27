@@ -96,6 +96,8 @@ struct Ui {
     overlay: gtk::Overlay,
     nav: gtk::Box,
     nav_list: gtk::Box,
+    /// The header, which shows the folder you're in after the app's name.
+    header: nyx_ui::chrome::AppHeader,
     search: gtk::SearchEntry,
     banners: gtk::Box,
     list_title: gtk::Label,
@@ -488,6 +490,7 @@ fn rebuild_list() {
         (rows, view_title(&u))
     };
     ui.borrow().list_title.set_text(&title);
+    ui.borrow().header.set_subtitle(&title);
     rebuild_kinds();
     chrome::set_title(&ui.borrow().window, "Mail", &title);
 
@@ -1396,15 +1399,13 @@ fn build(app: &gtk::Application) {
         .vexpand(true)
         .child(&nav_list)
         .build();
-    let head = chrome::sidebar_head("Mail", Some("Find messages (Ctrl+F)"));
-    head.toggle.connect_clicked(|_| toggle_sidebar());
-    nav.append(&head.root);
     nav.append(&nav_scroll);
 
     let search = gtk::SearchEntry::new();
-    search.set_placeholder_text(Some("Find messages: people, words, subjects"));
-    search.update_property(&[gtk::accessible::Property::Label("Find messages")]);
-    search.set_visible(false);
+    search.set_placeholder_text(Some("Search mail  (Ctrl+F)"));
+    search.update_property(&[gtk::accessible::Property::Label("Search mail")]);
+    search.add_css_class("bar-search");
+    search.set_width_chars(40);
     search.connect_search_changed(|_| {
         if let Some(ui) = ui() {
             ui.borrow_mut().limit = PAGE;
@@ -1413,21 +1414,7 @@ fn build(app: &gtk::Application) {
         rebuild_nav();
         refresh_readout();
     });
-    search.connect_stop_search(|entry| {
-        entry.set_text("");
-        entry.set_visible(false);
-    });
-    if let Some(find) = &head.search {
-        let entry = search.clone();
-        find.connect_clicked(move |_| {
-            if entry.is_visible() && entry.text().is_empty() {
-                entry.set_visible(false);
-            } else {
-                entry.set_visible(true);
-                entry.grab_focus();
-            }
-        });
-    }
+    search.connect_stop_search(leave_search);
 
     let banners = gtk::Box::new(gtk::Orientation::Vertical, 8);
     banners.add_css_class("banners");
@@ -1452,12 +1439,6 @@ fn build(app: &gtk::Application) {
     unread_toggle.add_css_class("unread-toggle");
     unread_toggle.connect_toggled(|t| set_unread_only(t.is_active()));
     list_bar.append(&unread_toggle);
-    let check = widgets::icon_button("view-refresh-symbolic", "Check for mail (Ctrl+R)");
-    check.connect_clicked(|_| check_mail());
-    list_bar.append(&check);
-    let new = widgets::icon_button("mail-message-new-symbolic", "New message (C)");
-    new.connect_clicked(|_| compose::open(Start::New));
-    list_bar.append(&new);
 
     let store = gio::ListStore::new::<glib::BoxedAnyObject>();
     let selection = gtk::SingleSelection::new(Some(store.clone()));
@@ -1555,7 +1536,6 @@ fn build(app: &gtk::Application) {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
     content.add_css_class("settings-content");
     content.set_hexpand(true);
-    content.append(&chrome::search_strip(&search));
     content.append(&banners);
     content.append(&panes);
 
@@ -1564,8 +1544,24 @@ fn build(app: &gtk::Application) {
     body.append(&nav);
     body.append(&content);
 
+    // The header: the app and the folder you're in, the sidebar toggle, search,
+    // and checking and writing mail.
+    let header = nyx_ui::chrome::app_header(&window, "mail-unread-symbolic", "Mail");
+    let collapse = nyx_ui::widgets::bar_button("sidebar-show-symbolic", "Collapse the sidebar (Ctrl+B)");
+    collapse.connect_clicked(|_| toggle_sidebar());
+    header.start.append(&collapse);
+    header.center.append(&search);
+    let check = nyx_ui::widgets::bar_button("view-refresh-symbolic", "Check for mail (Ctrl+R)");
+    check.connect_clicked(|_| check_mail());
+    header.end.append(&check);
+    let new = nyx_ui::widgets::bar_button("mail-message-new-symbolic", "New message (C)");
+    new.add_css_class("accent-action");
+    new.connect_clicked(|_| compose::open(Start::New));
+    header.end.append(&new);
+
     let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
     frame.add_css_class("window-frame");
+    frame.append(&header.root);
     frame.append(&body);
     frame.append(&status_bar());
 
@@ -1585,6 +1581,7 @@ fn build(app: &gtk::Application) {
         overlay: overlay.clone(),
         nav: nav.clone(),
         nav_list,
+        header,
         search,
         banners,
         list_title,
@@ -1666,10 +1663,15 @@ fn status_bar() -> gtk::Box {
     bar
 }
 
-fn apply_compact(nav: &gtk::Box, compact: bool) {
-    if let Some(head) = nav.first_child().and_downcast::<gtk::Box>() {
-        chrome::set_head_compact(&head, compact);
+/// Clear the search; the field stays in the header.
+fn leave_search(search: &gtk::SearchEntry) {
+    search.set_text("");
+    if let Some(window) = search.root().and_downcast::<gtk::Window>() {
+        gtk::prelude::GtkWindowExt::set_focus(&window, None::<&gtk::Widget>);
     }
+}
+
+fn apply_compact(nav: &gtk::Box, compact: bool) {
     if compact {
         nav.add_css_class("compact");
     } else {
@@ -1713,7 +1715,6 @@ fn install_keys(window: &gtk::ApplicationWindow, search: &gtk::SearchEntry) {
         if ctrl {
             match key {
                 gdk::Key::f => {
-                    search.set_visible(true);
                     search.grab_focus();
                 }
                 gdk::Key::b => toggle_sidebar(),
@@ -1724,9 +1725,8 @@ fn install_keys(window: &gtk::ApplicationWindow, search: &gtk::SearchEntry) {
             return glib::Propagation::Stop;
         }
         if key == gdk::Key::Escape {
-            if search.is_visible() {
-                search.set_text("");
-                search.set_visible(false);
+            if !search.text().is_empty() || search.has_focus() {
+                leave_search(&search);
                 rebuild_list();
                 rebuild_nav();
                 return glib::Propagation::Stop;
