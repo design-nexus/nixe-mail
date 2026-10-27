@@ -392,7 +392,10 @@ fn set_unread_only(on: bool) {
     ui.borrow_mut().unread_only = on;
     let toggle = ui.borrow().unread_toggle.clone();
     if toggle.is_active() != on {
-        toggle.set_active(on);
+        match toggle.prev_sibling().and_downcast::<gtk::ToggleButton>() {
+            Some(all) if !on => all.set_active(true),
+            _ => toggle.set_active(on),
+        }
     }
     rebuild_list();
 }
@@ -687,13 +690,52 @@ fn list_row(row: &Row) -> gtk::Box {
     if !preview.trim().is_empty() && prefs::get().show_previews {
         let p = widgets::label(preview.trim(), "mail-preview");
         p.set_xalign(0.0);
-        p.set_wrap(true);
-        p.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        p.set_lines(2);
+        p.set_single_line_mode(true);
         p.set_ellipsize(gtk::pango::EllipsizeMode::End);
         outer.append(&p);
     }
     outer
+}
+
+/// A conversation's row, with Archive, Star, Read and Delete over the end of its
+/// preview while the pointer is on it. Each acts on that row without marking it read.
+fn with_row_actions(content: &gtk::Widget, item: glib::WeakRef<gtk::ListItem>) -> gtk::Widget {
+    let overlay = gtk::Overlay::new();
+    overlay.set_child(Some(content));
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+    actions.add_css_class("row-actions");
+    actions.set_halign(gtk::Align::End);
+    actions.set_valign(gtk::Align::End);
+    actions.set_margin_end(8);
+    actions.set_margin_bottom(5);
+    actions.set_visible(false);
+    let buttons: [(&str, &str, fn()); 4] = [
+        ("nyx-mail-archive-symbolic", "Archive (E)", archive),
+        ("starred-symbolic", "Star or unstar (S)", toggle_star),
+        ("mail-unread-symbolic", "Mark read or unread (U)", toggle_unread),
+        ("user-trash-symbolic", "Move to Trash (#)", trash),
+    ];
+    for (icon, tip, run) in buttons {
+        let b = widgets::icon_button(icon, tip);
+        b.add_css_class("row-action");
+        let item = item.clone();
+        b.connect_clicked(move |_| {
+            if let Some(item) = item.upgrade()
+                && item.position() != gtk::INVALID_LIST_POSITION
+            {
+                select_quietly(item.position());
+                run();
+            }
+        });
+        actions.append(&b);
+    }
+    overlay.add_overlay(&actions);
+    let motion = gtk::EventControllerMotion::new();
+    let shown = actions.clone();
+    motion.connect_enter(move |_, _, _| shown.set_visible(true));
+    motion.connect_leave(move |_| actions.set_visible(false));
+    overlay.add_controller(motion);
+    overlay.upcast()
 }
 
 fn selected_row() -> Option<Row> {
@@ -1344,13 +1386,14 @@ pub(crate) fn rebuild_nav() {
         list_box.append(&group_label("Accounts", false, true));
     }
 
-    let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    spacer.set_vexpand(true);
-    list_box.append(&spacer);
-    let accounts_button =
-        nav_button("system-users-symbolic", "Online accounts", "Add or sign in to accounts in Settings", 0, false);
-    accounts_button.connect_clicked(|_| open_online_accounts());
-    list_box.append(&accounts_button);
+    if let Some(foot) = ui.borrow().nav.last_child().and_downcast::<gtk::Box>() {
+        while let Some(child) = foot.first_child() {
+            foot.remove(&child);
+        }
+        if let Some(address) = compose::send_from() {
+            foot.append(&send_from_row(&address));
+        }
+    }
 
     let nav = ui.borrow().nav.clone();
     apply_compact(&nav, NARROW.with(|n| n.get()) || prefs::get().sidebar_collapsed);
@@ -1400,6 +1443,9 @@ fn build(app: &gtk::Application) {
         .child(&nav_list)
         .build();
     nav.append(&nav_scroll);
+    let nav_foot = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    nav_foot.add_css_class("nav-foot");
+    nav.append(&nav_foot);
 
     let search = gtk::SearchEntry::new();
     search.set_placeholder_text(Some("Search mail  (Ctrl+F)"));
@@ -1424,21 +1470,34 @@ fn build(app: &gtk::Application) {
     let list_bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     list_bar.add_css_class("toolbar");
     let list_title = widgets::label("", "toolbar-title");
-    list_title.set_hexpand(true);
     list_title.set_xalign(0.0);
     list_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     // A long title ("Results for …") shortens; it never widens the list.
     list_title.set_max_width_chars(8);
     list_bar.append(&list_title);
-    let unread_toggle = gtk::ToggleButton::new();
-    unread_toggle.set_icon_name("mail-unread-symbolic");
+    let readout = widgets::label("", "status-readout");
+    readout.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    readout.set_xalign(0.0);
+    readout.set_hexpand(true);
+    readout.set_max_width_chars(1);
+    STATUS.with(|s| *s.borrow_mut() = Some(readout.clone()));
+    list_bar.append(&readout);
+    // All or only unread, like a view switch (Shift+U).
+    let show = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    show.add_css_class("segmented");
+    show.set_valign(gtk::Align::Center);
+    let all_toggle = gtk::ToggleButton::with_label("All");
+    all_toggle.add_css_class("segment");
+    all_toggle.set_tooltip_text(Some("Show all mail (Shift+U)"));
+    all_toggle.set_active(true);
+    let unread_toggle = gtk::ToggleButton::with_label("Unread");
+    unread_toggle.add_css_class("segment");
     unread_toggle.set_tooltip_text(Some("Show only unread (Shift+U)"));
-    unread_toggle.update_property(&[gtk::accessible::Property::Label("Show only unread")]);
-    unread_toggle.add_css_class("flat");
-    unread_toggle.add_css_class("icon-button");
-    unread_toggle.add_css_class("unread-toggle");
+    unread_toggle.set_group(Some(&all_toggle));
     unread_toggle.connect_toggled(|t| set_unread_only(t.is_active()));
-    list_bar.append(&unread_toggle);
+    show.append(&all_toggle);
+    show.append(&unread_toggle);
+    list_bar.append(&show);
 
     let store = gio::ListStore::new::<glib::BoxedAnyObject>();
     let selection = gtk::SingleSelection::new(Some(store.clone()));
@@ -1450,9 +1509,13 @@ fn build(app: &gtk::Application) {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else { return };
         let Some(obj) = item.item().and_downcast::<glib::BoxedAnyObject>() else { return };
         let row = obj.borrow::<Row>().clone();
-        let child = list_row(&row);
+        let child: gtk::Widget = if matches!(row, Row::Conversation(_)) {
+            with_row_actions(list_row(&row).upcast_ref(), item.downgrade())
+        } else {
+            list_row(&row).upcast()
+        };
         let position = item.position();
-        ROW_WIDGETS.with(|w| w.borrow_mut().insert(position, child.upcast_ref::<gtk::Widget>().downgrade()));
+        ROW_WIDGETS.with(|w| w.borrow_mut().insert(position, child.downgrade()));
         let weak = item.downgrade();
         widgets::on_right_click(&child, move |w, x, y| {
             if let Some(item) = weak.upgrade()
@@ -1547,10 +1610,10 @@ fn build(app: &gtk::Application) {
     // The header: the app and the folder you're in, the sidebar toggle, search,
     // and checking and writing mail.
     let header = nyx_ui::chrome::app_header(&window, "mail-unread-symbolic", "Mail");
+    header.center.append(&search);
     let collapse = nyx_ui::widgets::bar_button("sidebar-show-symbolic", "Collapse the sidebar (Ctrl+B)");
     collapse.connect_clicked(|_| toggle_sidebar());
-    header.start.append(&collapse);
-    header.center.append(&search);
+    header.end.append(&collapse);
     let check = nyx_ui::widgets::bar_button("view-refresh-symbolic", "Check for mail (Ctrl+R)");
     check.connect_clicked(|_| check_mail());
     header.end.append(&check);
@@ -1558,17 +1621,26 @@ fn build(app: &gtk::Application) {
     new.add_css_class("accent-action");
     new.connect_clicked(|_| compose::open(Start::New));
     header.end.append(&new);
+    header.end.append(&nyx_ui::chrome::settings_button(settings_dialog::open));
 
     let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
     frame.add_css_class("window-frame");
     frame.append(&header.root);
     frame.append(&body);
-    frame.append(&status_bar());
 
     let overlay = gtk::Overlay::new();
     overlay.set_child(Some(&frame));
     window.set_child(Some(&overlay));
     install_keys(&window, &search);
+    {
+        let list_view = list_view.clone();
+        window.connect_map(move |_| {
+            let list_view = list_view.clone();
+            glib::idle_add_local_once(move || {
+                list_view.grab_focus();
+            });
+        });
+    }
     window.connect_is_active_notify(|w| engine::set_active(w.is_active()));
     window.connect_close_request(|_| {
         flush_pending();
@@ -1646,21 +1718,22 @@ fn build(app: &gtk::Application) {
     });
 }
 
-fn status_bar() -> gtk::Box {
-    let bar = gtk::Box::new(gtk::Orientation::Horizontal, 16);
-    bar.add_css_class("status-bar");
-    bar.append(&chrome::shortcuts_button(show_shortcuts));
-    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-    bar.append(&spacer);
-    let readout = widgets::label("", "status-readout");
-    readout.set_ellipsize(gtk::pango::EllipsizeMode::Start);
-    STATUS.with(|s| *s.borrow_mut() = Some(readout.clone()));
-    bar.append(&readout);
-    let gear = chrome::gear(settings_dialog::open);
-    gear.update_property(&[gtk::accessible::Property::Label("Settings")]);
-    bar.append(&gear);
-    bar
+/// The sidebar's foot: who new mail is from. Settings → Writing changes it.
+fn send_from_row(address: &str) -> gtk::Box {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+    row.add_css_class("send-from");
+    row.set_tooltip_text(Some("New mail is sent from this address"));
+    let initial = address.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+    let avatar = widgets::label(&initial, "send-from-avatar");
+    avatar.set_valign(gtk::Align::Center);
+    row.append(&avatar);
+    let label = widgets::label(address, "send-from-address");
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label.add_css_class("compact-hide");
+    row.append(&label);
+    row
 }
 
 /// Clear the search; the field stays in the header.

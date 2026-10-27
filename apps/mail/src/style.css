@@ -56,11 +56,33 @@ window.mail-window .reader-bar button {
 }
 
 .mail-list > row:selected {
-  background: alpha(@theme_accent, 0.16);
+  background: mix(@theme_bg, @theme_accent, 0.16);
 }
 
 .mail-row {
-  padding: 9px 12px 10px 12px;
+  padding: 7px 12px 8px 12px;
+}
+
+/* Actions over the end of a row's preview while the pointer is on it. The fill
+   matches the row so the text under it doesn't show through. */
+.row-actions {
+  background: @row_hover;
+  border-radius: var(--nyx-radius-small);
+  padding: 1px 2px;
+}
+
+.mail-list > row:selected .row-actions {
+  background: mix(@theme_bg, @theme_accent, 0.16);
+}
+
+window.mail-window button.row-action {
+  min-width: 26px;
+  min-height: 24px;
+  padding: 0;
+}
+
+window.mail-window button.row-action:hover {
+  background: alpha(@theme_text, 0.08);
 }
 
 .mail-from {
@@ -267,8 +289,35 @@ window.mail-window .reader-bar button {
   margin: 4px 8px;
 }
 
-/* The list's Show only unread toggle, while it's on. */
-window.mail-window button.unread-toggle:checked {
-  background: alpha(@theme_accent, 0.16);
+/* The list's header: the folder, its count and sync state, and All / Unread. */
+.toolbar .status-readout {
+  color: @theme_dim_text;
+  font-size: 11.5px;
+  margin-left: 4px;
+}
+
+.toolbar .segmented button.segment {
+  padding: 0 10px;
+  min-height: 26px;
+}
+
+/* The sidebar's foot: who new mail is from. */
+.send-from {
+  margin: 8px 6px 6px 6px;
+  padding: 6px 8px;
+}
+
+.send-from-avatar {
+  min-width: 22px;
+  min-height: 22px;
+  border-radius: 11px;
+  background: alpha(@theme_accent, 0.22);
   color: @theme_accent;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.send-from-address {
+  color: @theme_dim_text;
+  font-size: 12.5px;
 }

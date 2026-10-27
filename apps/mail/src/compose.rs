@@ -114,6 +114,18 @@ pub fn open(start: Start) {
     build(draft, draft_id, answering, title, accounts);
 }
 
+/// The address a new message is sent from: the default account's.
+pub fn send_from() -> Option<String> {
+    let accounts: Vec<(String, Person)> = data::accounts()
+        .into_iter()
+        .map(|a| (a.id.clone(), Person { name: a.name.clone(), email: a.address.clone() }))
+        .collect();
+    if accounts.is_empty() {
+        return None;
+    }
+    Some(account_person(&accounts, &default_account(&accounts)).email)
+}
+
 fn account_person(accounts: &[(String, Person)], id: &str) -> Person {
     accounts.iter().find(|(a, _)| a == id).or(accounts.first()).map(|(_, p)| p.clone()).unwrap_or_default()
 }
