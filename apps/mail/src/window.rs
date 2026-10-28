@@ -1340,7 +1340,7 @@ pub(crate) fn rebuild_nav() {
         extra.push((View::Screener, "view-reveal-symbolic", "Screener", data::screener_count(&mailboxes) as i64));
     }
     extra.push((View::Snoozed, "alarm-symbolic", "Snoozed", 0));
-    extra.push((View::Scheduled, "appointment-soon-symbolic", "Scheduled", status.scheduled));
+    extra.push((View::Scheduled, "x-office-calendar-symbolic", "Scheduled", status.scheduled));
     extra.push((View::FollowUps, "document-open-recent-symbolic", "Follow-ups", status.follow_ups));
     extra.push((View::Senders, "x-office-address-book-symbolic", "Senders", 0));
     for (v, icon, name, count) in extra {
