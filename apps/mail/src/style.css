@@ -272,18 +272,6 @@ window.mail-window button.row-action:hover {
   font-weight: 600;
 }
 
-.kinds-bar {
-  padding: 4px 16px 8px 16px;
-}
-
-.kinds-bar .segmented {
-  min-width: 0;
-}
-
-.kinds-bar .segment {
-  padding-left: 6px;
-  padding-right: 6px;
-}
 
 .reader-banner {
   padding: 12px 24px 0 24px;

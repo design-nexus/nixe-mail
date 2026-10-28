@@ -42,7 +42,7 @@ pub const SHORTCUTS: &[(&[&str], &str)] = &[
     (&["U"], "Mark read or unread"),
     (&["Shift", "U"], "Show only unread"),
     (&["Z"], "Snooze"),
-    (&["1"], "Inbox"),
+    (&["1"], "Unified"),
     (&["2"], "Drafts"),
     (&["3"], "Sent"),
     (&["4"], "Archive"),
@@ -114,7 +114,6 @@ struct Ui {
     empty: gtk::Box,
     reader_bar: gtk::Box,
     /// All, Imbox, The Feed, Paper Trail (inbox views only).
-    kinds: gtk::Box,
     snooze: gtk::MenuButton,
     view: View,
     mailboxes: Vec<Mailbox>,
@@ -437,7 +436,8 @@ fn view_name(u: &Ui) -> String {
 
 fn role_name(role: Role) -> &'static str {
     match role {
-        Role::Inbox => "Inbox",
+        // Every account's inbox together; "Inbox" would read like "Imbox" beside it.
+        Role::Inbox => "Unified",
         Role::Sent => "Sent",
         Role::Drafts => "Drafts",
         Role::Trash => "Trash",
@@ -500,7 +500,6 @@ fn rebuild_list() {
     };
     ui.borrow().list_title.set_text(&title);
     ui.borrow().header.set_subtitle(&title);
-    rebuild_kinds();
     chrome::set_title(&ui.borrow().window, "Mail", &title);
 
     let (store, selection, open, scroll) = {
@@ -1318,6 +1317,19 @@ pub(crate) fn rebuild_nav() {
         button.connect_clicked(move |_| show_view(v.clone()));
         crate::menus::attach_role(&button, role);
         list_box.append(&button);
+        // The three kinds of inbox mail, sorted on this computer, under Unified.
+        if role == Role::Inbox {
+            for (kind, icon) in [
+                (Kind::Imbox, "avatar-default-symbolic"),
+                (Kind::Feed, "application-rss+xml-symbolic"),
+                (Kind::Paper, "x-office-document-symbolic"),
+            ] {
+                let v = View::Kind(kind);
+                let button = nav_button(icon, kind.name(), kind.name(), 0, active(&v));
+                button.connect_clicked(move |_| show_view(v.clone()));
+                list_box.append(&button);
+            }
+        }
     }
 
     // Sorting and timing (kept on this computer).
@@ -1565,10 +1577,7 @@ fn build(app: &gtk::Application) {
     list_column.add_css_class("list-column");
     list_column.set_size_request(340, -1);
     list_column.set_hexpand(false);
-    let kinds = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    kinds.add_css_class("kinds-bar");
     list_column.append(&list_bar);
-    list_column.append(&kinds);
     list_column.append(&list_stack);
 
     // The reading column.
@@ -1680,7 +1689,6 @@ fn build(app: &gtk::Application) {
         list_stack,
         empty,
         reader_bar,
-        kinds,
         snooze,
         view: View::All(Role::Inbox),
         mailboxes: Vec::new(),
@@ -1984,33 +1992,3 @@ fn show_toast(message: &str, undo: Option<Box<dyn Fn()>>) {
     });
 }
 
-/// The All / Imbox / Feed / Paper Trail switch over an inbox list.
-fn rebuild_kinds() {
-    let Some(ui) = ui() else { return };
-    let (kinds, view, search_on) = {
-        let u = ui.borrow();
-        (u.kinds.clone(), u.view.clone(), searching(&u))
-    };
-    while let Some(child) = kinds.first_child() {
-        kinds.remove(&child);
-    }
-    let shown = !search_on && matches!(view, View::All(Role::Inbox) | View::Kind(_));
-    kinds.set_visible(shown);
-    if !shown {
-        return;
-    }
-    let current = match view {
-        View::Kind(k) => k.id().to_string(),
-        _ => "all".to_string(),
-    };
-    let options: Vec<(String, String)> = [("all", "All"), ("imbox", "Imbox"), ("feed", "Feed"), ("paper", "Paper Trail")]
-        .iter()
-        .map(|(id, name)| (id.to_string(), name.to_string()))
-        .collect();
-    let switch = widgets::segmented(&options, &current, |id| {
-        // After this handler returns: the switch is rebuilt by the new view.
-        glib::idle_add_local_once(move || show_view(if id == "all" { View::All(Role::Inbox) } else { View::from_id(&id) }));
-    });
-    switch.set_hexpand(true);
-    kinds.append(&switch);
-}
