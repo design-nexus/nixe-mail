@@ -45,6 +45,15 @@ window.mail-window .reader-bar button {
   background: transparent;
 }
 
+/* The theme's text colour, not the desktop GTK theme's. */
+.mail-list > row {
+  color: @theme_text;
+}
+
+.nav-top {
+  padding: 0 8px 2px 8px;
+}
+
 .mail-list > row {
   padding: 0;
   margin: 0 8px 2px 8px;

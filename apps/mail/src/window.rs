@@ -390,6 +390,12 @@ fn set_unread_only(on: bool) {
         return;
     }
     ui.borrow_mut().unread_only = on;
+    if on {
+        // The open conversation is read; it would otherwise stay listed.
+        ui.borrow_mut().open = None;
+        select(gtk::INVALID_LIST_POSITION);
+        reader::show(None, &[]);
+    }
     let toggle = ui.borrow().unread_toggle.clone();
     if toggle.is_active() != on {
         match toggle.prev_sibling().and_downcast::<gtk::ToggleButton>() {
@@ -1442,6 +1448,16 @@ fn build(app: &gtk::Application) {
         .vexpand(true)
         .child(&nav_list)
         .build();
+    // The sidebar's own toggle, at its top right (centred on the narrow rail).
+    let nav_top = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    nav_top.add_css_class("nav-top");
+    let collapse = nyx_ui::widgets::bar_button("sidebar-show-symbolic", "Collapse the sidebar (Ctrl+B)");
+    collapse.add_css_class("nav-toggle");
+    collapse.set_hexpand(true);
+    collapse.set_halign(gtk::Align::End);
+    collapse.connect_clicked(|_| toggle_sidebar());
+    nav_top.append(&collapse);
+    nav.append(&nav_top);
     nav.append(&nav_scroll);
     let nav_foot = gtk::Box::new(gtk::Orientation::Vertical, 0);
     nav_foot.add_css_class("nav-foot");
@@ -1611,9 +1627,6 @@ fn build(app: &gtk::Application) {
     // and checking and writing mail.
     let header = nyx_ui::chrome::app_header(&window, "mail-unread-symbolic", "Mail");
     header.center.append(&search);
-    let collapse = nyx_ui::widgets::bar_button("sidebar-show-symbolic", "Collapse the sidebar (Ctrl+B)");
-    collapse.connect_clicked(|_| toggle_sidebar());
-    header.end.append(&collapse);
     let check = nyx_ui::widgets::bar_button("view-refresh-symbolic", "Check for mail (Ctrl+R)");
     check.connect_clicked(|_| check_mail());
     header.end.append(&check);
@@ -1752,6 +1765,9 @@ fn apply_compact(nav: &gtk::Box, compact: bool) {
         nav.remove_css_class("compact");
     }
     fn walk(widget: &gtk::Widget, compact: bool) {
+        if widget.has_css_class("nav-toggle") {
+            widget.set_halign(if compact { gtk::Align::Center } else { gtk::Align::End });
+        }
         if widget.has_css_class("compact-hide") {
             widget.set_visible(!compact);
         }
