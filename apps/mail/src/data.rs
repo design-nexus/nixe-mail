@@ -182,6 +182,14 @@ pub fn screener_count(all: &[Mailbox]) -> usize {
     list_with(&View::Screener.mailboxes(all), &View::Screener.filter(all, true), 500).len()
 }
 
+/// Unread conversations of one kind across every inbox, as its sidebar count.
+pub fn kind_unread(all: &[Mailbox], kind: Kind) -> usize {
+    let view = View::Kind(kind);
+    let mut filter = view.filter(all, screener_on());
+    filter.unread = true;
+    list_with(&view.mailboxes(all), &filter, 999).len()
+}
+
 pub fn senders(inboxes: &[i64]) -> Vec<SenderRow> {
     with(|db| db.senders(inboxes, 500))
 }

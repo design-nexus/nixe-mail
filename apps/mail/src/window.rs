@@ -1325,7 +1325,8 @@ pub(crate) fn rebuild_nav() {
                 (Kind::Paper, "x-office-document-symbolic"),
             ] {
                 let v = View::Kind(kind);
-                let button = nav_button(icon, kind.name(), kind.name(), 0, active(&v));
+                let count = data::kind_unread(&mailboxes, kind) as i64;
+                let button = nav_button(icon, kind.name(), kind.name(), count, active(&v));
                 button.connect_clicked(move |_| show_view(v.clone()));
                 list_box.append(&button);
             }
