@@ -1503,7 +1503,7 @@ dependencies = [
 [[package]]
 name = "nyx-theme"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nyx-design.git?rev=b685e18f022265450b082cd887a6a52f2f9b1609#b685e18f022265450b082cd887a6a52f2f9b1609"
+source = "git+https://github.com/design-nexus/nyx-design.git?rev=422cc55f2a083cf23be7071cc571be15876cbd31#422cc55f2a083cf23be7071cc571be15876cbd31"
 dependencies = [
  "gtk4",
  "nyx-core",
@@ -1514,7 +1514,7 @@ dependencies = [
 [[package]]
 name = "nyx-ui"
 version = "0.1.0"
-source = "git+https://github.com/design-nexus/nyx-design.git?rev=b685e18f022265450b082cd887a6a52f2f9b1609#b685e18f022265450b082cd887a6a52f2f9b1609"
+source = "git+https://github.com/design-nexus/nyx-design.git?rev=422cc55f2a083cf23be7071cc571be15876cbd31#422cc55f2a083cf23be7071cc571be15876cbd31"
 dependencies = [
  "gtk4",
  "nyx-core",
