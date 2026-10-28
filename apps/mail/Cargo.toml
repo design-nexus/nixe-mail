@@ -18,8 +18,8 @@ gtk = { version = "0.11", package = "gtk4", features = ["v4_18"] }
 nyx-accounts = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c" }
 nyx-core = { git = "https://github.com/design-nexus/nyx-core.git", rev = "52cba5e27a3dd5f00c780f53e423302b4b5f9c9c" }
 nyx-mail-core = { path = "../../crates/nyx-mail-core" }
-nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "422cc55f2a083cf23be7071cc571be15876cbd31" }
-nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "422cc55f2a083cf23be7071cc571be15876cbd31" }
+nyx-theme = { git = "https://github.com/design-nexus/nyx-design.git", rev = "9465abd2daa4433bc6ba47820417b57f62cdfb82" }
+nyx-ui = { git = "https://github.com/design-nexus/nyx-design.git", rev = "9465abd2daa4433bc6ba47820417b57f62cdfb82" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 webkit6 = { version = "0.6.1", features = ["v2_50"] }
