@@ -1,56 +1,16 @@
 //! The settings card's groups.
 
 use crate::prefs;
-use crate::theme;
 use crate::widgets::{self, Page};
 use crate::{data, window};
 use gtk::prelude::*;
 
 pub fn build(page: &Page) {
-    window_group(page);
     reading(page);
     writing(page);
     notifications(page);
     checking(page);
     accounts(page);
-    keyboard(page);
-}
-
-fn window_group(page: &Page) {
-    let group = page.group("Mail window");
-    group.add(&nyx_ui::widgets::start_row());
-    let prefs = prefs::get();
-    let options: Vec<(String, String)> = theme::all().iter().map(|t| (t.id.clone(), t.name.clone())).collect();
-    let (theme_row, theme_dd) =
-        widgets::choice_row("Theme", "A bundled theme, or one of your own.", options, &prefs.theme, |id| {
-            prefs::update(|p| {
-                p.theme = id;
-                p.mode = prefs::ThemeMode::Theme;
-            });
-            theme::apply();
-        });
-    theme_dd.set_sensitive(prefs.mode == prefs::ThemeMode::Theme || !theme::omarchy_available());
-    if theme::omarchy_available() {
-        let dd = theme_dd.clone();
-        let (row, _) = widgets::switch_row(
-            "Follow Omarchy theme",
-            "Match the desktop's colors and update when the Omarchy theme changes.",
-            prefs.mode == prefs::ThemeMode::Omarchy,
-            move |on| {
-                prefs::update(|p| p.mode = if on { prefs::ThemeMode::Omarchy } else { prefs::ThemeMode::Theme });
-                dd.set_sensitive(!on);
-                theme::apply();
-            },
-        );
-        group.add(&row);
-    }
-    group.add(&theme_row);
-    group.add(&nyx_ui::widgets::accent_row("mail"));
-    let (row, _) = widgets::switch_row("Reduce motion", "Turn off transitions in this window.", prefs.reduce_motion, |on| {
-        prefs::update(|p| p.reduce_motion = on);
-        theme::apply();
-    });
-    group.add(&row);
 }
 
 fn reading(page: &Page) {
@@ -358,9 +318,3 @@ fn account_switch(id: &str, address: &str, desc: &str, on: bool) -> gtk::Widget 
     row.upcast()
 }
 
-fn keyboard(page: &Page) {
-    let group = page.group("Keyboard");
-    for (keys, what) in window::SHORTCUTS {
-        group.add(&widgets::row(what, "", Some(widgets::key_caps(keys).upcast_ref())));
-    }
-}
